@@ -5,6 +5,8 @@ from db.database import get_db
 from schemas import *
 from db.models import User
 
+from auth import bcrypt_context
+
 router = APIRouter()
 
 @router.get("/users/{user_id}", response_model=UserFull)
@@ -59,7 +61,11 @@ def create_user(
     if db.query(User).filter(User.email == user.email).first():
         raise HTTPException(status_code=404, detail="User with this email alread exists!")
 
-    db_user = User(**user.dict())
+    pwd = user.password_string
+    print("pwdpwd:::::::::::::::::", pwd)
+    data = user.model_dump(exclude={"password_string"})
+    data["password_hashed"] = bcrypt_context.hash(pwd)
+    db_user = User(**data)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)

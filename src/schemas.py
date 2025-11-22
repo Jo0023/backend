@@ -2,11 +2,20 @@ from pydantic import BaseModel, EmailStr
 
 class UserCreate(BaseModel):
     email: EmailStr | None = None
+    password_string: str
     first_name: str
     middle_name: str
     last_name: str | None = None
 
-class UserFull(UserCreate):
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class UserFull(BaseModel):
+    email: EmailStr | None = None
+    first_name: str
+    middle_name: str
+    last_name: str | None = None
     id: int
     isu_number: int | None = None
     tg_nickname: str | None = None
