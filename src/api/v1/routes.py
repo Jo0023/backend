@@ -1,68 +1,322 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError  
 
 from db.database import get_db
 from schemas import *
-from db.models import User
+from db.models import User, Project, Resume
+from auth import hash_password, get_current_user
 
 router = APIRouter()
 
-@router.get("/users/{user_id}", response_model=UserFull)
+
+@router.get("/users/{user_id}", response_model=UserFull, tags=["user"])
 def fetch_user(
-    user_id: int, 
-    db: Session = Depends(get_db)
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
 ):
     db_user = db.query(User).filter(User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="There is no user with that id!")
-    
     return db_user
 
-@router.patch("/users/{user_id}", response_model=UserFull)
+
+@router.patch("/users/{user_id}", response_model=UserFull, tags=["user"])
 def update_user(
-    user_id: int, 
+    user_id: int,
     user: UserUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    if current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {user_id} can update their info!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     db_user = db.query(User).filter(User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="There is no user with that id!")
-    
+
     update_data = user.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_user, field, value)
 
-    db.commit()
-    db.refresh(db_user)
+    try:
+        db.commit()
+        db.refresh(db_user)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update a user",
+        )
 
     return db_user
 
-@router.delete("/users/{user_id}", response_model=DeleteResponse)
+
+@router.delete("/users/{user_id}", response_model=DeleteResponse, tags=["user"])
 def delete_user(
-    user_id: int, 
-    db: Session = Depends(get_db)
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    if current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {user_id} can update their info!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     db_user = db.query(User).filter(User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="There is no user with that id!")
-        
-    db.delete(db_user)
-    db.commit()
+
+    try:
+        db.delete(db_user)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user",
+        )
 
     return {"message": "User Deleted"}
 
-@router.post("/users", response_model=UserResponse)
-def create_user(
-    user: UserCreate, 
-    db: Session = Depends(get_db)
-):
-    if db.query(User).filter(User.email == user.email).first():
-        raise HTTPException(status_code=404, detail="User with this email alread exists!")
 
-    db_user = User(**user.dict())
+@router.post("/users", response_model=UserResponse, status_code=201, tags=["user"])
+def create_user(
+    user: UserCreate,
+    db: Session = Depends(get_db),
+):
+    pwd = user.password_string
+    data = user.model_dump(exclude={"password_string"})
+    data["password_hashed"] = hash_password(pwd)
+    db_user = User(**data)
     db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
+
+    try:
+        db.commit()
+        db.refresh(db_user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="User with this email already exists",
+        )
+
     return db_user
 
+
+@router.get("/projects/{project_id}", response_model=ProjectFull, tags=["project"])
+def fetch_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    db_project = db.query(Project).filter(Project.id == project_id).first()
+    if not db_project:
+        raise HTTPException(status_code=404, detail="There is no project with that id!")
+    return db_project
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectFull, tags=["project"])
+def update_project(
+    project_id: int,
+    project: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_project = db.query(Project).filter(Project.id == project_id).first()
+    if not db_project:
+        raise HTTPException(status_code=404, detail="There is no project with that id!")
+
+    if current_user.id != db_project.author.id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {db_project.author.id} can update their info!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    update_data = project.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_project, field, value)
+
+    try:
+        db.commit()
+        db.refresh(db_project)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update a project",
+        )
+
+    return db_project
+
+
+@router.delete("/projects/{project_id}", response_model=DeleteResponse, tags=["project"])
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_project = db.query(Project).filter(Project.id == project_id).first()
+    if not db_project:
+        raise HTTPException(status_code=404, detail="There is no project with that id!")
+
+    if current_user.id != db_project.author.id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {db_project.author.id} can delete this project!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        db.delete(db_project)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete the project",
+        )
+
+    return {"message": "Project Deleted"}
+
+
+@router.post("/projects", response_model=ProjectResponse, status_code=201, tags=["project"])
+def create_project(
+    project: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    data = project.model_dump(exclude_unset=True)
+    if "author_id" not in data:
+        data["author_id"] = current_user.id
+
+    db_project = Project(**data)
+    db.add(db_project)
+
+    try:
+        db.commit()
+        db.refresh(db_project)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create the project",
+        )
+
+    return db_project
+
+
+@router.get("/resumes/{resume_id}", response_model=ResumeFull, tags=["resume"])
+def fetch_resume(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    db_resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not db_resume:
+        raise HTTPException(status_code=404, detail="There is no resume with that id!")
+    return db_resume
+
+
+@router.post("/resumes", response_model=ResumeResponse, status_code=201, tags=["resume"])
+def create_resume(
+    resume: ResumeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    data = resume.model_dump(exclude_unset=True)
+    if "user_id" not in data:
+        data["user_id"] = current_user.id
+
+    db_resume = Resume(**data)
+    db.add(db_resume)
+
+    try:
+        db.commit()
+        db.refresh(db_resume)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create the resume",
+        )
+
+    return db_resume
+
+
+@router.patch("/resumes/{resume_id}", response_model=ResumeFull, tags=["resume"])
+def update_resume(
+    resume_id: int,
+    resume: ResumeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not db_resume:
+        raise HTTPException(status_code=404, detail="There is no resume with that id!")
+
+    if current_user.id != db_resume.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {db_resume.user_id} can update this resume!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    update_data = resume.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_resume, field, value)
+
+    try:
+        db.commit()
+        db.refresh(db_resume)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update the resume",
+        )
+
+    return db_resume
+
+
+@router.delete("/resumes/{resume_id}", response_model=DeleteResponse, tags=["resume"])
+def delete_resume(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not db_resume:
+        raise HTTPException(
+            status_code=404,
+            detail="There is no resume with that id!",
+        )
+
+    if current_user.id != db_resume.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {db_resume.user_id} can delete this resume!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        db.delete(db_resume)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete the resume",
+        )
+
+    return {"message": "Resume Deleted"}

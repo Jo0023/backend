@@ -1,9 +1,19 @@
 from typing import List, Optional
-from sqlalchemy import ForeignKey, String
-from sqlalchemy.orm import Mapped, mapped_column, relationship # DeclarativeBase, 
+from sqlalchemy import ForeignKey, String, Table, Column
+from sqlalchemy.orm import Mapped, mapped_column, relationship # DeclarativeBase,
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
+
+resume_role_table = Table(
+    "resume_role",
+    Base.metadata,
+    Column("resume_id", ForeignKey("resume.id"), primary_key=True),
+    Column("role_id", ForeignKey("role.id"), primary_key=True),
+)
+
+
+
 
 # class Base(DeclarativeBase):
 #    pass
@@ -41,29 +51,40 @@ class Resume(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     header: Mapped[str]
-    # I think resume should be stored in .md or .html (if we want to allow advanced formatting)
-    # In the current system the resume editor is cumbersome, I would like to see it simplified. 
-    # .md is perfect (you write plain text with no distractions), but .html can be allowed alongside for creativity..
-    # The question is how will images be storred? since they are supported by both markdown and html..
-    # And how will the switcher "md | html" in the editor work? the translation is too complex and will enevitably 
-    # cause partial data loss. it should be on the user's shoulder to translate from one language to another, so that 
-    # we are not responsible the the information loss 
     resume_text: Mapped[str | None] = mapped_column(nullable=True)
-    # roles: what student wants to do. it should be here and not in the "Response.note", because we want to be able to filter students by roles and perform automatic distribution
 
     user: Mapped["User"] = relationship(back_populates="resumes")
 
-    def __repr__(self) -> str:
-        return f"Resume(id={self.id!r}, user_id={self.user_id!r}, resume_text={self.resume_text!r})"
+    roles: Mapped[list["Role"]] = relationship(
+        "Role",
+        secondary=resume_role_table,
+        back_populates="resumes",
+    )
 
-# class Role(Base):
-# will be used in both Resumes and project descriptions. 
-# what students want to do (generally) <-> what projects need. will be convenient for filtering and automatic distribution
-# note that is it not the same as skills
-# in automatic distribution we will have match priority:
-# skills (ideally they should match)
-# roles (at least roles should match)
-# random
+    def __repr__(self) -> str:
+        return (
+            f"Resume(id={self.id!r}, "
+            f"user_id={self.user_id!r}, "
+            f"resume_text={self.resume_text!r})"
+        )
+
+
+class Role(Base):
+    __tablename__ = "role"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+
+    resumes: Mapped[list["Resume"]] = relationship(
+        "Resume",
+        secondary=resume_role_table,
+        back_populates="roles",
+    )
+
+    def __repr__(self) -> str:
+        return f"Role(id={self.id!r}, name={self.name!r})"
+
+
 
 class Project(Base):
     __tablename__ = "project"
