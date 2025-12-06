@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from db.database import get_db
 from schemas import *
-from db.models import User, Project
+from db.models import User, Project, Resume
 from auth import hash_password, get_current_user
 
 router = APIRouter()
@@ -20,13 +20,12 @@ def fetch_user(
     db_user = db.query(User).filter(User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="There is no user with that id!")
-    
     return db_user
 
 
 @router.patch("/users/{user_id}", response_model=UserFull, tags=['user'])
 def update_user(
-    user_id: int, 
+    user_id: int,
     user: UserUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -42,7 +41,7 @@ def update_user(
     db_user = db.query(User).filter(User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="There is no user with that id!")
-    
+
     update_data = user.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_user, field, value)
@@ -202,3 +201,109 @@ def create_project(
 
     return db_project
 
+
+
+@router.get("/resumes/{resume_id}", response_model=ResumeFull, tags=["resume"])
+def fetch_resume(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    db_resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not db_resume:
+        raise HTTPException(status_code=404, detail="There is no resume with that id!")
+    return db_resume
+
+
+@router.post("/resumes", response_model=ResumeResponse, status_code=201, tags=["resume"])
+def create_resume(
+    resume: ResumeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    data = resume.model_dump(exclude_unset=True)
+    if "user_id" not in data:
+        data["user_id"] = current_user.id
+
+    db_resume = Resume(**data)
+    db.add(db_resume)
+
+    try:
+        db.commit()
+        db.refresh(db_resume)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create the resume",
+        )
+
+    return db_resume
+
+
+@router.patch("/resumes/{resume_id}", response_model=ResumeFull, tags=["resume"])
+def update_resume(
+    resume_id: int,
+    resume: ResumeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not db_resume:
+        raise HTTPException(status_code=404, detail="There is no resume with that id!")
+
+    if current_user.id != db_resume.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {db_resume.user_id} can update this resume!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    update_data = resume.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_resume, field, value)
+
+    try:
+        db.commit()
+        db.refresh(db_resume)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update the resume",
+        )
+
+    return db_resume
+
+
+@router.delete("/resumes/{resume_id}", response_model=DeleteResponse, tags=["resume"])
+def delete_resume(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not db_resume:
+        raise HTTPException(
+            status_code=404,
+            detail="There is no resume with that id!",
+        )
+
+    if current_user.id != db_resume.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Only a user with id {db_resume.user_id} can delete this resume!",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        db.delete(db_resume)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete the resume",
+        )
+
+    return {"message": "Resume Deleted"}
