@@ -23,6 +23,8 @@ services:
     build: .
     container_name: backend
     restart: unless-stopped
+    networks:
+      - learning_projects_network
     ports:
       - "8083:8000"
     volumes:
@@ -34,6 +36,8 @@ services:
       dockerfile: Dockerfile
     container_name: frontend
     restart: unless-stopped
+    networks:
+      - learning_projects_network
     ports:
       - "80:80"
     environment:
@@ -47,5 +51,4 @@ services:
 
 
 networks:
-  default:
-    name: learning_projects_network
+  learning_projects_network:
