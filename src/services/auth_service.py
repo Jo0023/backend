@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, Request, status
@@ -12,7 +13,7 @@ from src.core.logging_config import get_logger, security_logger
 from src.model.models import User
 from src.repository.user_repository import UserRepository
 from src.schema.auth import Token
-
+from src.schema.user import UserUpdate
 
 class AuthService:
     def __init__(self, user_repository: UserRepository):
@@ -23,6 +24,9 @@ class AuthService:
         self._access_token_expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
         self._logger = get_logger(self.__class__.__name__)
 
+        # Регулярное выражение для валидации Telegram username
+        self._telegram_regex = re.compile(r'^@\w{5,32}$')
+
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Проверить пароль"""
         return self._pwd_context.verify(plain_password, hashed_password)
@@ -30,6 +34,20 @@ class AuthService:
     def get_password_hash(self, password: str) -> str:
         """Хешировать пароль"""
         return self._pwd_context.hash(password)
+
+    def validate_telegram_username(self, telegram: str | None) -> None:
+        """Валидация Telegram username"""
+        if telegram is None:
+            return
+
+        telegram = telegram.strip()
+        if not self._telegram_regex.match(telegram):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Telegram username должен начинаться с @ и содержать от 5 до 32 символов (буквы, цифры, подчеркивания)"
+            )
+
+
 
     async def authenticate_user(self, email: str, password: str) -> User | None:
         """Аутентификация пользователя"""
@@ -87,9 +105,9 @@ class AuthService:
         return encoded_jwt
 
     async def login_for_access_token(
-        self,
-        form_data: OAuth2PasswordRequestForm,
-        request: Request | None = None,
+            self,
+            form_data: OAuth2PasswordRequestForm,
+            request: Request | None = None,
     ) -> Token:
         """Вход в систему и получение токена"""
         email = form_data.username
@@ -128,3 +146,37 @@ class AuthService:
     async def get_user_by_token(self, token: str) -> User:
         """Получить пользователя по токену"""
         return await self.get_current_user(token)
+
+    async def update_telegram_username(self, user: User, telegram: str | None) -> User:
+        """Обновить Telegram username пользователя"""
+        # Валидация формата
+        self.validate_telegram_username(telegram)
+
+        if telegram:
+            telegram = telegram.strip()
+
+            # Проверка уникальности (кроме текущего пользователя)
+            existing_user = await self._user_repository.get_by_telegram(telegram)
+            if existing_user and existing_user.id != user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Этот Telegram username уже используется другим пользователем"
+                )
+
+        # Обновление через UserUpdate схему
+        user_update = UserUpdate(telegram=telegram)
+        updated_user = await self._user_repository.update(user.id, user_update)
+
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Пользователь с id {user.id} не найден"
+            )
+
+        self._logger.info(f"Updated Telegram username for user {user.email}: {telegram}")
+        return updated_user
+
+    async def get_user_by_telegram(self, telegram: str) -> User | None:
+        """Получить пользователя по Telegram username"""
+        self.validate_telegram_username(telegram)
+        return await self._user_repository.get_by_telegram(telegram.strip())
