@@ -65,6 +65,24 @@ class AuthService:
         self._logger.info(f"Successful authentication for user: {email} (ID: {user.id})")
         return user
 
+    async def authenticate_by_isu(self, isu_number: int, password: str) -> User | None:
+        """Аутентификация по ИСУ номеру"""
+        self._logger.debug(f"Authentication attempt for ISU: {isu_number}")
+
+        # Получаем пользователя по ИСУ
+        user = await self._user_repository.get_by_isu(isu_number)
+        if not user:
+            self._logger.warning(f"User not found with ISU: {isu_number}")
+            return None
+
+        # Проверяем пароль
+        if not self.verify_password(password, user.password_hashed):
+            self._logger.warning(f"Invalid password for user with ISU: {isu_number}")
+            return None
+
+        self._logger.info(f"Successful authentication for ISU: {isu_number} (ID: {user.id})")
+        return user
+
     async def get_current_user(self, token: str) -> User:
         """Получить текущего пользователя из токена"""
         credentials_exception = HTTPException(

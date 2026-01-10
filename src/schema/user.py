@@ -78,6 +78,7 @@ class UserUpdate(BaseModel):
         pattern=r'^@\w{5,32}$',
         description="Telegram username в формате @username"
     )
+    itmo_id: int | None = None
 
     @field_validator('telegram')
     @classmethod
@@ -106,7 +107,7 @@ class UserListItem(BaseModel):
     isu_number: int | None = None
     telegram: Optional[str] = None
     tg_nickname: str | None = None
-
+    itmo_id: int | None = None
     class Config:
         from_attributes = True
 
