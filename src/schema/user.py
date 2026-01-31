@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
-from src.util.validator import validate_telegram_username
 
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from src.util.validator import validate_telegram_username
 
 
 class UserBase(BaseModel):
     """Базовая схема пользователя"""
 
     email: EmailStr | None = None
-    first_name: str = Field(..., min_length=1, max_length=100)  # Использует Field
-    middle_name: str = Field(..., min_length=1, max_length=100)  # Использует Field
-    last_name: str | None = Field(None, min_length=1, max_length=100)  # Использует Field
-    telegram: Optional[str] = Field(  # Использует Field
+    first_name: str = Field(..., min_length=1, max_length=100)
+    middle_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str | None = Field(None, min_length=1, max_length=100)
+    telegram: Optional[str] = Field(
         None,
         min_length=6,
         max_length=33,
@@ -27,12 +27,22 @@ class UserBase(BaseModel):
         """Валидация Telegram username"""
         return validate_telegram_username(v)
 
+
 class UserCreate(UserBase):
     """Схема для создания пользователя"""
 
-    password_string: str
-    isu_number: int | None = None
-    telegram: Optional[str] | None = None
+    password_string: str = Field(
+        ...,
+        min_length=8,
+        max_length=100,
+        description="Пароль (минимум 8 символов)"
+    )
+    isu_number: int | None = Field(
+        None,
+        ge=100000,
+        le=999999,
+        description="ISU номер (6 цифр)"
+    )
 
     @field_validator('telegram')
     @classmethod
@@ -49,6 +59,41 @@ class UserCreate(UserBase):
 
         return validated
 
+class UserCreateByISU(BaseModel):
+    """Схема для создания пользователя по ИСУ номеру"""
+
+    isu_number: int = Field(
+        ...,
+        ge=100000,
+        le=999999,
+        description="ИСУ номер (6 цифр)"
+    )
+    password_string: str = Field(
+        ...,
+        min_length=8,
+        max_length=100,
+        description="Пароль (минимум 8 символов)"
+    )
+    telegram: Optional[str] = Field(
+        None,
+        min_length=6,
+        max_length=33,
+        pattern=r'^@\w{5,32}$',
+        description="Telegram username (опционально)"
+    )
+
+    @field_validator('telegram')
+    @classmethod
+    def validate_telegram(cls, v: Optional[str]) -> Optional[str]:
+        return validate_telegram_username(v)
+
+
+class ISURegistrationResponse(BaseModel):
+    """Ответ при регистрации по ИСУ"""
+    user: UserResponse
+    token: str
+    message: str = "Регистрация по ИСУ успешно завершена"
+
 
 class UserFull(UserBase):
     """Полная схема пользователя"""
@@ -56,7 +101,6 @@ class UserFull(UserBase):
     id: int
     isu_number: int | None = None
     tg_nickname: str | None = None
-    telegram: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -78,7 +122,6 @@ class UserUpdate(BaseModel):
         pattern=r'^@\w{5,32}$',
         description="Telegram username в формате @username"
     )
-    itmo_id: int | None = None
 
     @field_validator('telegram')
     @classmethod
@@ -86,11 +129,18 @@ class UserUpdate(BaseModel):
         """Валидация Telegram при обновлении"""
         return validate_telegram_username(v)
 
+
 class UserResponse(BaseModel):
     """Схема ответа с пользователем"""
 
     id: int
     email: EmailStr
+    first_name: str
+    middle_name: str
+    last_name: str | None = None
+    telegram: Optional[str] = None
+    isu_number: int | None = None
+    tg_nickname: str | None = None
 
     class Config:
         from_attributes = True
@@ -105,9 +155,9 @@ class UserListItem(BaseModel):
     middle_name: str
     last_name: str | None = None
     isu_number: int | None = None
-    telegram: Optional[str] = None
     tg_nickname: str | None = None
-    itmo_id: int | None = None
+    telegram: Optional[str] = None
+
     class Config:
         from_attributes = True
 

@@ -15,6 +15,7 @@ from src.repository.user_repository import UserRepository
 from src.schema.auth import Token
 from src.schema.user import UserUpdate
 
+
 class AuthService:
     def __init__(self, user_repository: UserRepository):
         self._user_repository = user_repository
@@ -47,8 +48,6 @@ class AuthService:
                 detail="Telegram username должен начинаться с @ и содержать от 5 до 32 символов (буквы, цифры, подчеркивания)"
             )
 
-
-
     async def authenticate_user(self, email: str, password: str) -> User | None:
         """Аутентификация пользователя"""
         self._logger.debug(f"Authentication attempt for email: {email}")
@@ -63,24 +62,6 @@ class AuthService:
             return None
 
         self._logger.info(f"Successful authentication for user: {email} (ID: {user.id})")
-        return user
-
-    async def authenticate_by_isu(self, isu_number: int, password: str) -> User | None:
-        """Аутентификация по ИСУ номеру"""
-        self._logger.debug(f"Authentication attempt for ISU: {isu_number}")
-
-        # Получаем пользователя по ИСУ
-        user = await self._user_repository.get_by_isu(isu_number)
-        if not user:
-            self._logger.warning(f"User not found with ISU: {isu_number}")
-            return None
-
-        # Проверяем пароль
-        if not self.verify_password(password, user.password_hashed):
-            self._logger.warning(f"Invalid password for user with ISU: {isu_number}")
-            return None
-
-        self._logger.info(f"Successful authentication for ISU: {isu_number} (ID: {user.id})")
         return user
 
     async def get_current_user(self, token: str) -> User:
@@ -123,9 +104,9 @@ class AuthService:
         return encoded_jwt
 
     async def login_for_access_token(
-            self,
-            form_data: OAuth2PasswordRequestForm,
-            request: Request | None = None,
+        self,
+        form_data: OAuth2PasswordRequestForm,
+        request: Request | None = None,
     ) -> Token:
         """Вход в систему и получение токена"""
         email = form_data.username

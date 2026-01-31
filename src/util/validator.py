@@ -3,6 +3,8 @@ import re
 
 def validate_telegram_username(username: str | None) -> str | None:
     """Валидация Telegram username"""
+    MIN_USERNAME_LENGTH = 6
+    MAX_USERNAME_LENGTH = 33
     if username is None or username.strip() == "":
         return None
 
@@ -11,7 +13,7 @@ def validate_telegram_username(username: str | None) -> str | None:
     if not username.startswith('@'):
         raise ValueError("Telegram username должен начинаться с @")
 
-    if len(username) < 6 or len(username) > 33:  # @ + 5-32 символов
+    if len(username) < MIN_USERNAME_LENGTH or len(username) > MAX_USERNAME_LENGTH:  # @ + 5-32 символов
         raise ValueError("Telegram username должен содержать от 5 до 32 символов после @")
 
     # Проверка символов
