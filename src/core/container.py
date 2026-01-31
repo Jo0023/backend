@@ -7,10 +7,12 @@ from fastapi import Depends
 from src.core.uow import IUnitOfWork, SqlAlchemyUoW
 from src.repository.project_repository import ProjectRepository
 from src.repository.resume_repository import ResumeRepository
+from src.repository.session_repository import SessionRepository
 from src.repository.user_repository import UserRepository
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
 from src.services.resume_service import ResumeService
+from src.services.session_service import SessionService
 from src.services.user_service import UserService
 
 
@@ -32,16 +34,15 @@ async def get_user_repository(uow: IUnitOfWork = Depends(get_uow)) -> UserReposi
     return UserRepository(uow)
 
 
+async def get_session_repository(uow: IUnitOfWork = Depends(get_uow)) -> SessionRepository:
+    return SessionRepository(uow)
+
+
 # Service
-async def get_auth_service(user_repository: UserRepository = Depends(get_user_repository)) -> AuthService:
-    return AuthService(user_repository)
-
-
-async def get_user_service(
-    user_repository: UserRepository = Depends(get_user_repository),
-    auth_service: AuthService = Depends(get_auth_service),
-) -> UserService:
-    return UserService(user_repository, auth_service)
+async def get_session_service(
+    session_repository: SessionRepository = Depends(get_session_repository),
+) -> SessionService:
+    return SessionService(session_repository)
 
 
 async def get_resume_service(resume_repository: ResumeRepository = Depends(get_resume_repository)) -> ResumeService:
@@ -52,3 +53,17 @@ async def get_project_service(
     project_repository: ProjectRepository = Depends(get_project_repository),
 ) -> ProjectService:
     return ProjectService(project_repository)
+
+
+async def get_auth_service(
+    user_repository: UserRepository = Depends(get_user_repository),
+    session_service: SessionService = Depends(get_session_service),
+) -> AuthService:
+    return AuthService(user_repository, session_service)
+
+
+async def get_user_service(
+    user_repository: UserRepository = Depends(get_user_repository),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> UserService:
+    return UserService(user_repository, auth_service)

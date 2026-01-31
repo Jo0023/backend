@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
-
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from src.util.validator import validate_telegram_username
 
 
@@ -59,6 +58,7 @@ class UserCreate(UserBase):
 
         return validated
 
+
 class UserCreateByISU(BaseModel):
     """Схема для создания пользователя по ИСУ номеру"""
 
@@ -102,8 +102,7 @@ class UserFull(UserBase):
     isu_number: int | None = None
     tg_nickname: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserUpdate(BaseModel):
@@ -142,8 +141,7 @@ class UserResponse(BaseModel):
     isu_number: int | None = None
     tg_nickname: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserListItem(BaseModel):
@@ -158,8 +156,7 @@ class UserListItem(BaseModel):
     tg_nickname: str | None = None
     telegram: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserListResponse(BaseModel):
@@ -170,3 +167,5 @@ class UserListResponse(BaseModel):
     page: int
     limit: int
     total_pages: int
+
+    model_config = ConfigDict(from_attributes=True)

@@ -3,13 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
 
 from core.container import get_auth_service
 from src.core.logging_config import get_logger
-
-# OAuth2PasswordBearer импорт заменен для корректной работы с логированием
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+from src.core.security import oauth2_scheme
 
 if TYPE_CHECKING:
     from src.model.models import User
@@ -25,11 +22,12 @@ async def get_current_user(
 
     try:
         user = await auth_service.get_current_user(token)
-        logger.debug(f"Successfully retrieved current user: {user.email} (ID: {user.id})")
-        return user
     except HTTPException as e:
         logger.warning(f"Failed to get current user - Status: {e.status_code}, Detail: {e.detail}")
         raise
+    else:
+        logger.debug(f"Successfully retrieved current user: {user.email} (ID: {user.id})")
+        return user
 
 
 async def get_current_user_no_exception(
@@ -41,11 +39,12 @@ async def get_current_user_no_exception(
 
     try:
         user = await auth_service.get_current_user(token)
-        logger.debug(f"Successfully retrieved current user (no exception): {user.email} (ID: {user.id})")
-        return user
     except HTTPException as e:
         logger.debug(f"Failed to get current user (no exception) - Status: {e.status_code}")
         return None
+    else:
+        logger.debug(f"Successfully retrieved current user (no exception): {user.email} (ID: {user.id})")
+        return user
 
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:

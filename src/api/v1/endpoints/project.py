@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.core.container import get_project_service
 from src.core.dependencies import get_current_user
 from src.model.models import User
-from src.schema.project import ProjectCreate, ProjectFull, ProjectListResponse, ProjectUpdate
+from src.schema.project import ProjectCreate, ProjectFull, ProjectListItem, ProjectListResponse, ProjectUpdate
 from src.services.project_service import ProjectService
 
 project_router = APIRouter(prefix="/projects", tags=["project"])
@@ -16,7 +16,7 @@ async def fetch_project(
     project_id: int,
     project_service: ProjectService = Depends(get_project_service),
     _current_user: User = Depends(get_current_user),
-):
+) -> ProjectFull:
     """Получить проект по ID"""
     project = await project_service.get_project_by_id(project_id)
     if not project:
@@ -31,10 +31,10 @@ async def fetch_projects(
     limit: int = Query(10, ge=1, le=100, description="Количество проектов на странице"),
     project_service: ProjectService = Depends(get_project_service),
     _current_user: User = Depends(get_current_user),
-):
+) -> ProjectListResponse:
     """Получить список проектов с пагинацией"""
     projects, total = await project_service.get_projects_paginated(page, limit)
-    projects_list = [ProjectFull.model_validate(project) for project in projects]
+    projects_list = [ProjectListItem.model_validate(project) for project in projects]
 
     total_pages = (total + limit - 1) // limit if total > 0 else 0
 
@@ -52,7 +52,7 @@ async def create_project(
     project_data: ProjectCreate,
     project_service: ProjectService = Depends(get_project_service),
     current_user: User = Depends(get_current_user),
-):
+) -> ProjectFull:
     """Создать новый проект"""
     project = await project_service.create_project(project_data, current_user.id)
     return ProjectFull.model_validate(project)
@@ -64,18 +64,22 @@ async def update_project(
     project_data: ProjectUpdate = Depends(ProjectUpdate),
     project_service: ProjectService = Depends(get_project_service),
     current_user: User = Depends(get_current_user),
-):
+) -> ProjectFull:
     """Обновить проект (только автор может обновлять)"""
-    try:
-        project = await project_service.update_project(project_id, project_data, current_user.id)
+
+    def _get_project_or_raise_not_found() -> None:
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        return ProjectFull.model_validate(project)
+    try:
+        project = await project_service.update_project(project_id, project_data, current_user.id)
+        _get_project_or_raise_not_found()
     except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=403, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to update project: {e!s}") from e
+    else:
+        return ProjectFull.model_validate(project)
 
 
 @project_router.delete("/{project_id}")
@@ -83,13 +87,17 @@ async def delete_project(
     project_id: int,
     project_service: ProjectService = Depends(get_project_service),
     current_user: User = Depends(get_current_user),
-):
+) -> dict[str, str]:
     """Удалить проект (только автор может удалять)"""
-    try:
-        success = await project_service.delete_project(project_id, current_user.id)
+
+    def _check_success_or_raise_not_found() -> None:
         if not success:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        return {"message": "Project deleted successfully"}
+    try:
+        success = await project_service.delete_project(project_id, current_user.id)
+        _check_success_or_raise_not_found()
     except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    else:
+        return {"message": "Project deleted successfully"}

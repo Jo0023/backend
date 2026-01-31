@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost/backend_db"
-    DEBUG: bool = False
+    DEBUG: str = "false"
 
     # Environment
     ENVIRONMENT: str = "development"
@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # CORS - исправленные настройки для Docker
     CORS_ORIGINS: list = [
+        "http://localhost:5173/",
         "http://localhost:8000",
         "http://localhost:5173",
         "http://backend:8000",
@@ -36,9 +37,7 @@ class Settings(BaseSettings):
     ENABLE_FILE_LOGGING: bool = True
     ENABLE_CONSOLE_LOGGING: bool = True
 
-    class Config:
-        env_file = "../.env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file="../.env", extra="ignore")
 
 
 settings = Settings()
