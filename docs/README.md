@@ -6,6 +6,10 @@ Domain areas description:
 - [Chat](wiki/chat.md)
 - [Landing](wiki/landing.md)
 
+# Project architecture
+
+![architecture](images/backend_architecture.png)
+
 # Development
 
 - [All modules explained](modules_docs.md)
