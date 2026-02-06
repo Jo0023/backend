@@ -15,10 +15,12 @@ class PasswordResetRequest(BaseModel):
 
     email: EmailStr
 
+
 class PasswordResetResponse(BaseModel):
     """Схема для ответа при запросе сброса"""
-    
+
     message: str = "Письмо отправлено, если адрес существует"
+
 
 class PasswordResetConfirm(BaseModel):
     """Схема для подтверждения нового пароля"""
