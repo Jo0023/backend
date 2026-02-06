@@ -191,9 +191,10 @@ class AuditLog(Base):
     def __repr__(self) -> str:
         return f"AuditLog(id={self.id}, entity_type={self.entity_type!r}, entity_id={self.entity_id}, action={self.action!r})"
 
+
 class PasswordReset(Base):
     __tablename__ = "password_reset"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
