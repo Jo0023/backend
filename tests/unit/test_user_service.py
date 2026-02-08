@@ -38,7 +38,11 @@ class TestUserService:
         user_service = UserService(mock_repository, mock_auth_service)
 
         user_data = UserCreate(
-            email="test@example.com", first_name="Test", middle_name="User", password_string="plain_password"
+            email="test@example.com",
+            first_name="Test",
+            middle_name="User",
+            password_string="plain_password",
+            role_id=None,
         )
 
         # when
