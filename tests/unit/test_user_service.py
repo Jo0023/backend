@@ -26,7 +26,12 @@ class TestUserService:
         mock_auth_service.get_password_hash.return_value = "hashed_password"
 
         mock_user = User(
-            id=1, email="test@example.com", first_name="Test", middle_name="User", password_hashed="hashed_password", role_id=None
+            id=1,
+            email="test@example.com",
+            first_name="Test",
+            middle_name="User",
+            password_hashed="hashed_password",
+            role_id=None,
         )
         mock_repository.create.return_value = mock_user
 
