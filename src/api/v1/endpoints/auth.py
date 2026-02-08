@@ -2,14 +2,20 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from src.core.container import get_auth_service
 from src.core.dependencies import get_current_user
 from src.core.logging_config import api_logger
 from src.model.models import User
-from src.schema.auth import PasswordResetRequest, PasswordResetResponse, PasswordResetSuccessfulResponse, PasswordResetConfirm, Token
+from src.schema.auth import (
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    PasswordResetResponse,
+    PasswordResetSuccessfulResponse,
+    Token,
+)
 from src.services.auth_service import AuthService
 
 auth_router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -96,17 +102,15 @@ async def request_password_reset(
 
     return PasswordResetResponse()
 
+
 @auth_router.post("/password-reset/confirm", response_model=PasswordResetSuccessfulResponse)
 async def confirm_password_reset(
     data: PasswordResetConfirm,
     auth_service: AuthService = Depends(get_auth_service),
-)->PasswordResetConfirm:
-    """Подтвердить сброс пароля """
+) -> PasswordResetConfirm:
+    """Подтвердить сброс пароля"""
     sucess = await auth_service.confirm_password_reset(data.token, data.new_password)
 
     if not sucess:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
     return PasswordResetSuccessfulResponse()

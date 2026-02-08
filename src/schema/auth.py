@@ -21,10 +21,12 @@ class PasswordResetResponse(BaseModel):
 
     message: str = "The email has been sent"
 
+
 class PasswordResetSuccessfulResponse(BaseModel):
     """Схема для успешного ответа при запросе сброса пароля"""
 
     message: str = "Password reset successfully"
+
 
 class PasswordResetConfirm(BaseModel):
     """Схема для подтверждения нового пароля"""
