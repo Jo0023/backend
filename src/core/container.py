@@ -6,12 +6,14 @@ from fastapi import Depends
 
 from src.core.uow import IUnitOfWork, SqlAlchemyUoW
 from src.repository.audit_repository import AuditRepository
+from src.repository.evaluation_repository import EvaluationRepository
 from src.repository.project_repository import ProjectRepository
 from src.repository.resume_repository import ResumeRepository
 from src.repository.session_repository import SessionRepository
 from src.repository.user_repository import UserRepository
 from src.services.audit_service import AuditService
 from src.services.auth_service import AuthService
+from src.services.evaluation_service import EvaluationService
 from src.services.project_service import ProjectService
 from src.services.resume_service import ResumeService
 from src.services.session_service import SessionService
@@ -42,6 +44,10 @@ async def get_session_repository(uow: IUnitOfWork = Depends(get_uow)) -> Session
 
 async def get_audit_repository(uow: IUnitOfWork = Depends(get_uow)) -> AuditRepository:
     return AuditRepository(uow)
+
+
+async def get_evaluation_repository(uow: IUnitOfWork = Depends(get_uow)) -> EvaluationRepository:
+    return EvaluationRepository(uow)
 
 
 # Service
@@ -79,3 +85,17 @@ async def get_audit_service(
     audit_repository: AuditRepository = Depends(get_audit_repository),
 ) -> AuditService:
     return AuditService(audit_repository)
+
+
+# ========== МОДУЛЬ ОЦЕНКИ / EVALUATION MODULE ==========
+async def get_evaluation_service(
+    evaluation_repository: EvaluationRepository = Depends(get_evaluation_repository),
+    project_repository: ProjectRepository = Depends(get_project_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
+) -> EvaluationService:
+    """Получить сервис оценок / Get evaluation service"""
+    return EvaluationService(
+        evaluation_repository=evaluation_repository,
+        project_repository=project_repository,
+        user_repository=user_repository,
+    )
