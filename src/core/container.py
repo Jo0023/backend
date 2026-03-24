@@ -6,13 +6,15 @@ from fastapi import Depends
 
 from src.core.uow import IUnitOfWork, SqlAlchemyUoW
 from src.repository.audit_repository import AuditRepository
-from src.repository.password_reset_repository import PasswordResetRepository
+from src.repository.evaluation_repository import EvaluationRepository
+from src.repository.password_reset_repository import PasswordResetRepository  # ← AJOUTER CET IMPORT
 from src.repository.project_repository import ProjectRepository
 from src.repository.resume_repository import ResumeRepository
 from src.repository.session_repository import SessionRepository
 from src.repository.user_repository import UserRepository
 from src.services.audit_service import AuditService
 from src.services.auth_service import AuthService
+from src.services.evaluation_service import EvaluationService
 from src.services.project_service import ProjectService
 from src.services.resume_service import ResumeService
 from src.services.session_service import SessionService
@@ -45,8 +47,12 @@ async def get_audit_repository(uow: IUnitOfWork = Depends(get_uow)) -> AuditRepo
     return AuditRepository(uow)
 
 
-async def get_password_reset_repository(uow: IUnitOfWork = Depends(get_uow)) -> PasswordResetRepository:
+async def get_password_reset_repository(uow: IUnitOfWork = Depends(get_uow)) -> PasswordResetRepository:  # ← AJOUTER CETTE FONCTION
     return PasswordResetRepository(uow)
+
+
+async def get_evaluation_repository(uow: IUnitOfWork = Depends(get_uow)) -> EvaluationRepository:
+    return EvaluationRepository(uow)
 
 
 # Service
@@ -69,7 +75,7 @@ async def get_project_service(
 async def get_auth_service(
     user_repository: UserRepository = Depends(get_user_repository),
     session_service: SessionService = Depends(get_session_service),
-    password_reset_repository: PasswordResetRepository = Depends(get_password_reset_repository),
+    password_reset_repository: PasswordResetRepository = Depends(get_password_reset_repository),  # ← CORRIGER ICI
 ) -> AuthService:
     return AuthService(user_repository, session_service, password_reset_repository)
 
@@ -85,3 +91,17 @@ async def get_audit_service(
     audit_repository: AuditRepository = Depends(get_audit_repository),
 ) -> AuditService:
     return AuditService(audit_repository)
+
+
+# ========== МОДУЛЬ ОЦЕНКИ / EVALUATION MODULE ==========
+async def get_evaluation_service(
+    evaluation_repository: EvaluationRepository = Depends(get_evaluation_repository),
+    project_repository: ProjectRepository = Depends(get_project_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
+) -> EvaluationService:
+    """Получить сервис оценок / Get evaluation service"""
+    return EvaluationService(
+        evaluation_repository=evaluation_repository,
+        project_repository=project_repository,
+        user_repository=user_repository,
+    )

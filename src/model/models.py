@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.database import Base
@@ -136,6 +136,12 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    # for evalution module
+    project_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        default="product"
+    )
 
     def __repr__(self) -> str:
         return f"Project(id={self.id!r}, author_id={self.author_id!r}, description={self.description!r})"
@@ -234,14 +240,229 @@ class AuditLog(Base):
     def __repr__(self) -> str:
         return f"AuditLog(id={self.id}, entity_type={self.entity_type!r}, entity_id={self.entity_id}, action={self.action!r})"
 
-
 class PasswordReset(Base):
-    __tablename__ = "password_reset"
+    """
+    Модель для хранения токенов сброса пароля / Password reset tokens model
+    """
+    __tablename__ = "password_resets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
-    token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    # Relationships
     user: Mapped[User] = relationship()
+
+    def __repr__(self) -> str:
+        return f"PasswordReset(id={self.id!r}, user_id={self.user_id!r}, token={self.token!r})"
+    
+    
+# ========== МОДУЛЬ ОЦЕНКИ / EVALUATION MODULE ==========
+# Модели для ручной оценки проектов / Models for manual project evaluation
+# Добавлено: февраль 2026 / Added: February 2026
+
+
+class PresentationSession(Base):
+    """
+    Сессия презентации проекта / Project presentation session
+    Фиксирует timeline презентации: начало, открытие оценки, статус
+    Records presentation timeline: start, evaluation opening, status
+    """
+
+    __tablename__ = "presentation_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), nullable=False)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
+
+    # Timeline / Хронология
+    presentation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evaluation_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evaluation_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Status / Статус
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    """
+    Статус сессии / Session status:
+    - PENDING: ожидает / pending
+    - ACTIVE: активна / active
+    - EVALUATED: оценена / evaluated
+    - SKIPPED: пропущена / skipped
+    """
+    is_final: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    """Флаг финальной сессии / Final session flag"""
+
+    # Metadata / Метаданные
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships / Связи
+    project: Mapped[Project] = relationship()
+    teacher: Mapped[User] = relationship(foreign_keys=[teacher_id])
+
+    def __repr__(self) -> str:
+        return f"PresentationSession(id={self.id!r}, project_id={self.project_id!r}, status={self.status!r})"
+
+
+class CommissionEvaluation(Base):
+    """
+    Оценка члена комиссии / Commission member evaluation
+    Экспертная оценка проекта по критериям, зависит от типа проекта
+    Expert project evaluation by criteria, depends on project type
+    """
+
+    __tablename__ = "commission_evaluations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("presentation_sessions.id"), nullable=False)
+    commissioner_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
+
+    # Project type / Тип проекта
+    project_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    """
+    Тип проекта / Project type:
+    - product: продуктовый / product
+    - technical: технический / technical
+    - research: исследовательский / research
+    - custom: кастомный / custom
+    """
+
+    # Scores and comment / Оценки и комментарий
+    scores: Mapped[dict] = mapped_column(JSON, nullable=True)  
+    """
+    Оценки по критериям / Scores by criteria
+    Формат: {"criteria_name": score} (1-5)
+    """
+
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    """Комментарий эксперта / Expert comment"""
+
+    # Calculated average / Рассчитанное среднее
+    average_score: Mapped[float] = mapped_column(Float, nullable=False)
+    """Средняя оценка / Average score"""
+
+    # Submission / Отправка
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    """Время отправки / Submission time"""
+    is_submitted: Mapped[bool] = mapped_column(default=False, nullable=False)
+    """Флаг отправки / Submission flag"""
+
+    # Relationships / Связи
+    session: Mapped[PresentationSession] = relationship()
+    """Связь с сессией / Relationship with session"""
+    commissioner: Mapped[User] = relationship(foreign_keys=[commissioner_id])
+    """Связь с членом комиссии / Relationship with commissioner"""
+    criteria_scores: Mapped[list["CriterionScore"]] = relationship(
+        back_populates="commission_evaluation",
+        cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"CommissionEvaluation(id={self.id!r}, session_id={self.session_id!r}, score={self.average_score!r})"
+
+
+class PeerEvaluation(Base):
+    """
+    Взаимная оценка членов команды / Peer evaluation between team members
+    Два типа: руководитель → участники, участники → руководитель (анонимно)
+    Two types: leader → members, members → leader (anonymous)
+    """
+
+    __tablename__ = "peer_evaluations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    """Уникальный идентификатор / Unique identifier"""
+
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), nullable=False)
+    """ID проекта / Project ID"""
+
+    session_id: Mapped[int] = mapped_column(ForeignKey("presentation_sessions.id"), nullable=False)
+    """ID сессии презентации / Presentation session ID"""
+
+    # Who evaluates whom / Кто кого оценивает
+    evaluator_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
+    """ID оценивающего / Evaluator ID"""
+
+    evaluated_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
+    """ID оцениваемого / Evaluated person ID"""
+
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    """
+    Роль в оценке / Evaluation role:
+    - leader_to_member: руководитель → участник / leader → member
+    - member_to_leader: участник → руководитель / member → leader
+    """
+
+    # Scores and comment / Оценки и комментарий
+    criteria_scores: Mapped[dict] = mapped_column(JSON, nullable=False)
+    """
+    Оценки по критериям / Scores by criteria
+    Формат: {"criteria_name": score} (1-5)
+    """
+
+    comment: Mapped[str] = mapped_column(String(500), nullable=False)
+    """Комментарий (обязательный) / Comment (required)"""
+
+    # Anonymity / Анонимность
+    is_anonymous: Mapped[bool] = mapped_column(default=True, nullable=False)
+    """
+    Флаг анонимности / Anonymity flag
+    Всегда True для member_to_leader
+    Always True for member_to_leader
+    """
+
+    # Submission / Отправка
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    """Время отправки / Submission time"""
+    is_submitted: Mapped[bool] = mapped_column(default=False, nullable=False)
+    """Флаг отправки / Submission flag"""
+    
+    # Relationships / Связи
+    project: Mapped[Project] = relationship()
+    """Связь с проектом / Relationship with project"""
+    session: Mapped[PresentationSession] = relationship()
+    """Связь с сессией / Relationship with session"""
+    evaluator: Mapped[User] = relationship(foreign_keys=[evaluator_id])
+    """Связь с оценивающим / Relationship with evaluator"""
+    evaluated: Mapped[User] = relationship(foreign_keys=[evaluated_id])
+    """Связь с оцениваемым / Relationship with evaluated person"""
+
+    def __repr__(self) -> str:
+        return f"PeerEvaluation(id={self.id!r}, evaluator={self.evaluator_id!r}, evaluated={self.evaluated_id!r}, role={self.role!r})"
+
+
+class EvaluationConfig(Base):
+    """
+    Конфигурация системы оценки / Evaluation system configuration
+    """
+    __tablename__ = "evaluation_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Délai pour les évaluations mutuelles (en jours)
+    peer_evaluation_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    """Количество дней для асинхронной оценки / Days for async evaluation"""
+    # Délai pour l'évaluation de la commission (en minutes)
+    commission_evaluation_minutes: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    """Минуты для оценки комиссии / Minutes for commission evaluation"""
+    # Délai pour la présentation (en minutes)
+    presentation_minutes: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    """Минуты для презентации / Minutes for presentation"""
+    # Délai pour ouvrir l'évaluation (en minutes)
+    evaluation_opening_minutes: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    """Минуты для открытия оценки / Minutes for evaluation opening"""
+    # Active ou non
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    """Активная конфигурация / Active configuration"""
+    
+    # Métadonnées
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    
+    # Relations
+    updater: Mapped[User | None] = relationship()
+
+    def __repr__(self) -> str:
+        return f"EvaluationConfig(id={self.id!r}, peer_days={self.peer_evaluation_days!r})"

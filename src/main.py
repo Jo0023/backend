@@ -26,7 +26,7 @@ async def lifespan(_app: FastAPI):
     logger.info(f"Database URL: {settings.DATABASE_URL}")
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        # await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables created/verified")
 
     setup_audit_listeners()

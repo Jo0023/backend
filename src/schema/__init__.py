@@ -3,18 +3,52 @@ from __future__ import annotations
 
 from .auth import Token
 from .base import Blank, DeleteResponse, FindBase, FindDateRange, FindResult, PaginatedResponse
+from .evaluation import (
+    CommissionEvaluationBase,
+    CommissionEvaluationResponse,
+    CommissionEvaluationSubmit,
+    FinalGradeRequest,
+    FinalGradeResponse,
+    PeerEvaluationBase,
+    PeerEvaluationLeaderSummary,
+    PeerEvaluationMemberSummary,
+    PeerEvaluationResponse,
+    PeerEvaluationSubmit,
+    PresentationSessionBase,
+    PresentationSessionCreate,
+    PresentationSessionOpenResponse,
+    PresentationSessionResponse,
+    PresentationSessionStartResponse,
+    ProjectEvaluationStatus,
+)
 from .project import ProjectCreate, ProjectFull, ProjectListItem, ProjectListResponse, ProjectResponse, ProjectUpdate
 from .resume import ResumeCreate, ResumeFull, ResumeListResponse, ResumeResponse, ResumeUpdate
 from .user import UserBase, UserCreate, UserFull, UserListItem, UserListResponse, UserResponse, UserUpdate
 
 __all__ = [
     "Blank",
+    "CommissionEvaluationBase",
+    "CommissionEvaluationResponse",
+    "CommissionEvaluationSubmit",
     "DeleteResponse",
+    "FinalGradeRequest",
+    "FinalGradeResponse",
     "FindBase",
     "FindDateRange",
     "FindResult",
     "PaginatedResponse",
+    "PeerEvaluationBase",
+    "PeerEvaluationLeaderSummary",
+    "PeerEvaluationMemberSummary",
+    "PeerEvaluationResponse",
+    "PeerEvaluationSubmit",
+    "PresentationSessionBase",
+    "PresentationSessionCreate",
+    "PresentationSessionOpenResponse",
+    "PresentationSessionResponse",
+    "PresentationSessionStartResponse",
     "ProjectCreate",
+    "ProjectEvaluationStatus",
     "ProjectFull",
     "ProjectListItem",
     "ProjectListResponse",
