@@ -1,32 +1,29 @@
 """
-Схемы Pydantic для модуля оценки / Pydantic schemas for evaluation module
+Pydantic schemas for evaluation module / Схемы оценки
 """
 
 from __future__ import annotations
-
 from datetime import datetime
+from pydantic import BaseModel, ConfigDict
 
-from pydantic import BaseModel
 
-# ========== СЕССИИ ПРЕЗЕНТАЦИЙ / PRESENTATION SESSIONS ==========
-
+# =========================================================
+# PRESENTATION SESSIONS
+# =========================================================
 
 class PresentationSessionBase(BaseModel):
-    """Базовая схема сессии презентации / Base presentation session schema"""
-
+    """Базовая схема сессии презентации"""
     project_id: int
     teacher_id: int
 
 
 class PresentationSessionCreate(PresentationSessionBase):
-    """Создание сессии презентации / Create presentation session"""
-
+    """Создание сессии презентации"""
     pass
 
 
 class PresentationSessionResponse(PresentationSessionBase):
-    """Ответ с данными сессии / Presentation session response"""
-
+    """Ответ с данными сессии"""
     id: int
     status: str
     presentation_started_at: datetime | None = None
@@ -34,13 +31,11 @@ class PresentationSessionResponse(PresentationSessionBase):
     evaluation_closes_at: datetime | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PresentationSessionStartResponse(BaseModel):
-    """Ответ при старте презентации / Start presentation response"""
-
+    """Ответ при старте презентации"""
     session_id: int
     status: str
     timer_seconds: int = 300
@@ -48,8 +43,7 @@ class PresentationSessionStartResponse(BaseModel):
 
 
 class PresentationSessionOpenResponse(BaseModel):
-    """Ответ при открытии оценки / Open evaluation response"""
-
+    """Ответ при открытии оценки"""
     session_id: int
     status: str
     timer_seconds: int = 120
@@ -57,12 +51,12 @@ class PresentationSessionOpenResponse(BaseModel):
     message: str = "Оценивание открыто / Evaluation opened"
 
 
-# ========== ОЦЕНКИ КОМИССИИ / COMMISSION EVALUATIONS ==========
-
+# =========================================================
+# COMMISSION EVALUATION
+# =========================================================
 
 class CommissionEvaluationBase(BaseModel):
-    """Базовая схема оценки комиссии / Base commission evaluation schema"""
-
+    """Базовая схема оценки комиссии"""
     session_id: int
     commissioner_id: int
     scores: dict[str, int]
@@ -70,87 +64,78 @@ class CommissionEvaluationBase(BaseModel):
 
 
 class CommissionEvaluationSubmit(CommissionEvaluationBase):
-    """Отправка оценки комиссии / Submit commission evaluation"""
-
+    """Отправка оценки комиссии"""
     pass
 
 
 class CommissionEvaluationResponse(CommissionEvaluationBase):
-    """Ответ с оценкой комиссии / Commission evaluation response"""
-
+    """Ответ с оценкой комиссии"""
     id: int
     project_type: str
     average_score: float
     submitted_at: datetime
     is_submitted: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ========== ВЗАИМНЫЕ ОЦЕНКИ / PEER EVALUATIONS ==========
-
+# =========================================================
+# PEER EVALUATION
+# =========================================================
 
 class PeerEvaluationBase(BaseModel):
-    """Базовая схема взаимной оценки / Base peer evaluation schema"""
-
+    """Базовая схема взаимной оценки"""
     project_id: int
     session_id: int
     evaluator_id: int
     evaluated_id: int
-    role: str  # "leader_to_member" или "member_to_leader"
+    role: str  # "leader_to_member" ou "member_to_leader"
     scores: dict[str, int]
     comment: str
 
 
 class PeerEvaluationSubmit(PeerEvaluationBase):
-    """Отправка взаимной оценки / Submit peer evaluation"""
-
+    """Отправка взаимной оценки"""
     pass
 
 
 class PeerEvaluationResponse(PeerEvaluationBase):
-    """Ответ с взаимной оценкой / Peer evaluation response"""
-
+    """Ответ с взаимной оценкой"""
     id: int
     is_anonymous: bool
     submitted_at: datetime
     is_submitted: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PeerEvaluationLeaderSummary(BaseModel):
-    """Сводка оценок для руководителя (анонимная) / Leader summary (anonymous)"""
-
+    """Сводка оценок pour руководителя (анонимная)"""
     averages: dict[str, float]
     comments: list[str]
     evaluations_count: int
 
 
 class PeerEvaluationMemberSummary(BaseModel):
-    """Сводка оценок для участника / Member summary"""
-
+    """Сводка оценок pour участника"""
     scores: dict[str, int]
     comment: str
     evaluator_role: str
 
 
-# ========== ИТОГОВЫЕ ОЦЕНКИ / FINAL GRADES ==========
-
+# =========================================================
+# FINAL GRADES
+# =========================================================
 
 class FinalGradeRequest(BaseModel):
-    """Запрос итоговой оценки / Final grade request"""
-
+    """Запрос итоговой оценки"""
     project_id: int
     student_id: int
-    role: str  # "leader" или "member"
+    role: str  # "leader" ou "member"
 
 
 class FinalGradeResponse(BaseModel):
-    """Ответ с итоговой оценкой / Final grade response"""
-
+    """Ответ с итоговой оценкой"""
     student_id: int
     project_id: int
     role: str
@@ -162,12 +147,12 @@ class FinalGradeResponse(BaseModel):
     grade_5_scale: int  # 2,3,4,5
 
 
-# ========== СТАТИСТИКА / STATISTICS ==========
-
+# =========================================================
+# PROJECT STATUS
+# =========================================================
 
 class ProjectEvaluationStatus(BaseModel):
-    """Статус оценок проекта / Project evaluation status"""
-
+    """Статус оценок проекта"""
     project_id: int
     project_name: str
     session_id: int | None = None
@@ -177,24 +162,24 @@ class ProjectEvaluationStatus(BaseModel):
     is_complete: bool
     can_be_finalized: bool
 
-class CommissionEvaluationBase(BaseModel):
-    session_id: int
-    commissioner_id: int
-    scores: dict[str, int]
-    comment: str | None = None
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "session_id": 1,
-                "commissioner_id": 6,
-                "scores": {
-                    "presentation_clarity": 4,
-                    "teamwork": 5,
-                    "product_understanding": 4,
-                    "ux_demo": 3,
-                    "product_value": 5
-                },
-                "comment": "Très bon projet"
-            }
+# =========================================================
+# EXAMPLE SCHEMA METADATA
+# =========================================================
+
+CommissionEvaluationBase.model_config = {
+    "json_schema_extra": {
+        "example": {
+            "session_id": 1,
+            "commissioner_id": 6,
+            "scores": {
+                "presentation_clarity": 4,
+                "teamwork": 5,
+                "product_understanding": 4,
+                "ux_demo": 3,
+                "product_value": 5
+            },
+            "comment": "Très bon projet"
         }
+    }
+}

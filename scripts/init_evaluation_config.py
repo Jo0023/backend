@@ -13,7 +13,7 @@ async def init_config():
         if not existing:
             config = EvaluationConfig(
                 peer_evaluation_days=7,
-                commission_evaluation_minutes=2,
+                commission_evaluation_minutes=10,
                 presentation_minutes=5,
                 evaluation_opening_minutes=10,
                 is_active=True,

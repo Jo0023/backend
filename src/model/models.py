@@ -264,6 +264,32 @@ class PasswordReset(Base):
 # Модели для ручной оценки проектов / Models for manual project evaluation
 # Добавлено: февраль 2026 / Added: February 2026
 
+class PresentationSchedule(Base):
+    """
+    Планирование презентаций / Presentation schedule
+    Позволяет преподавателю определить, какие проекты будут представлены в какой день
+    """
+    __tablename__ = "presentation_schedule"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), nullable=False)
+    presentation_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    """
+    Статус планирования / Schedule status:
+    - PENDING: запланирован / scheduled
+    - SKIPPED: пропущен / skipped
+    - COMPLETED: завершен / completed
+    """
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    project: Mapped[Project] = relationship()
+
+    def __repr__(self) -> str:
+        return f"PresentationSchedule(id={self.id!r}, project_id={self.project_id!r}, date={self.presentation_date!r})"
+
 
 class PresentationSession(Base):
     """

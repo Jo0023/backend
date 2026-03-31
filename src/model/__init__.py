@@ -10,6 +10,9 @@ from src.model.models import (
     Response,
     Resume,
     User,
+    PeerEvaluation,
+    EvaluationConfig,
+    PresentationSchedule,
 )
 
 from src.model.criterion_score import CriterionScore
@@ -29,5 +32,7 @@ __all__ = [
     "CriterionScore",
     "EvaluationTemplate",
     "EvaluationCriterion",
+    "EvaluationConfig",
+    "PresentationSchedule",
 
 ]
