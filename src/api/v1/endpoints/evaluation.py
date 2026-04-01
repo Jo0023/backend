@@ -1,385 +1,627 @@
-"""
-Evaluation API - Clean orchestration layer
-"""
+from __future__ import annotations
 
-from typing import Annotated
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from datetime import datetime
 
-from src.core.dependencies import get_current_user, get_current_teacher, get_current_commission
-from src.services.evaluation_service import EvaluationService, UserRole  
-from src.core.container import get_evaluation_service
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+
+from src.core.container import (
+    get_commission_evaluation_service,
+    get_evaluation_config_service,
+    get_final_grade_service,
+    get_peer_evaluation_service,
+    get_presentation_service,
+    get_project_evaluation_status_service,
+)
+from src.core.dependencies import get_current_user, setup_audit
+from src.core.exceptions import NotFoundError, PermissionError, ValidationError
 from src.model.models import User
-from src.schema.evaluation import (
-    CommissionEvaluationSubmit,
+from src.schema.commission_evaluation import (
+    CommissionAverageResponse,
+    CommissionEvaluationsListResponse,
     CommissionEvaluationResponse,
-    PeerEvaluationSubmit,
-    PeerEvaluationResponse,
-    FinalGradeRequest,
-    FinalGradeResponse,
+    CommissionEvaluationSubmit,
+)
+from src.schema.evaluation_config import EvaluationConfigResponse, EvaluationConfigUpdate
+from src.schema.final_grade import FinalGradeRequest, FinalGradeResponse, ProjectEvaluationStatus
+from src.schema.peer_evaluation import (
+    LeaderToMemberEvaluationSubmit,
+    MemberToLeaderEvaluationSubmit,
     PeerEvaluationLeaderSummary,
-    ProjectEvaluationStatus,
+    PeerEvaluationMemberFeedbackListResponse,
+    PeerEvaluationSubmitResponse,
+)
+from src.schema.presentation import (
+    PeerDeadlineResponse,
+    PresentationSessionOpenResponse,
     PresentationSessionResponse,
     PresentationSessionStartResponse,
-    PresentationSessionOpenResponse,
+    ProjectSessionActionResponse,
+    ReorderProjectsRequest,
+    ReorderProjectsResponse,
+    ScheduleForDateItem,
+    SchedulePresentationsRequest,
+    SchedulePresentationsResponse,
+    TodayProjectItem,
 )
+from src.services.commission_evaluation_service import CommissionEvaluationService
+from src.services.evaluation_config_service import EvaluationConfigService
+from src.services.final_grade_service import FinalGradeService
+from src.services.peer_evaluation_service import PeerEvaluationService
+from src.services.presentation_service import PresentationService
+from src.services.project_evaluation_status_service import ProjectEvaluationStatusService
 
-router = APIRouter(prefix="/evaluation", tags=["evaluation"])
+evaluation_router = APIRouter(prefix="/evaluation", tags=["evaluation"])
 
 
-# =====================================================
-# SERVICE DEPENDENCY
-# =====================================================
+def _handle_evaluation_exception(exc: Exception) -> None:
+    """
+    Единая трансляция доменных ошибок в HTTP-ошибки
+    Unified translation of domain exceptions into HTTP errors
+    """
+    if isinstance(exc, NotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if isinstance(exc, PermissionError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if isinstance(exc, ValidationError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    raise exc
 
-ServiceDep = Annotated[EvaluationService, Depends(get_evaluation_service)]
-UserDep = Annotated[User, Depends(get_current_user)]
-TeacherDep = Annotated[User, Depends(get_current_teacher)]
-CommissionDep = Annotated[User, Depends(get_current_commission)]
 
-# temporairement pour le test:
-@router.get("/ping")
-async def ping():
-    """Simple ping endpoint to test if router is working"""
-    return {"status": "ok", "message": "pong"}
-@router.get("/test-user")
-async def test_user(
-    current_user: UserDep,
-):
-    """Test user dependency"""
-    return {
-        "user_id": current_user.id,
-        "user_email": current_user.email,
-        "role_id": current_user.role_id
-    }
-# =====================================================
-# CONFIG
-# =====================================================
+# ========== КОНФИГУРАЦИЯ / CONFIGURATION ==========
 
-@router.get("/config", response_model=dict)
+
+@evaluation_router.get(
+    "/config",
+    response_model=EvaluationConfigResponse,
+    summary="Получить конфигурацию системы оценки",
+)
 async def get_evaluation_config(
-    service: ServiceDep,
-) -> dict:
-    """Get current evaluation configuration"""
-    return await service.get_evaluation_config()
+    config_service: EvaluationConfigService = Depends(get_evaluation_config_service),
+    _current_user: User = Depends(get_current_user),
+) -> EvaluationConfigResponse:
+    """
+    Получить активную конфигурацию модуля оценки
+    Get active evaluation config
+    """
+    return await config_service.get_config()
 
 
-@router.put("/config", response_model=dict)
+@evaluation_router.put(
+    "/config",
+    response_model=EvaluationConfigResponse,
+    summary="Обновить конфигурацию системы оценки",
+)
 async def update_evaluation_config(
-    current_user: TeacherDep,  # ← 1. SANS DÉFAUT (path, dependency)
-    service: ServiceDep,       # ← 2. SANS DÉFAUT
-    peer_evaluation_days: int | None = Query(None, ge=1),  # ← 3. AVEC DÉFAUT
-    commission_evaluation_minutes: int | None = Query(None, ge=1),
-    presentation_minutes: int | None = Query(None, ge=1),
-    evaluation_opening_minutes: int | None = Query(None, ge=1),
-) -> dict:
-    """Update evaluation configuration"""
-    return await service.update_evaluation_config(
-        peer_evaluation_days=peer_evaluation_days,
-        commission_evaluation_minutes=commission_evaluation_minutes,
-        presentation_minutes=presentation_minutes,
-        evaluation_opening_minutes=evaluation_opening_minutes,
-        teacher_id=current_user.id,
-    )
+    data: EvaluationConfigUpdate,
+    config_service: EvaluationConfigService = Depends(get_evaluation_config_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> EvaluationConfigResponse:
+    """
+    Обновить конфигурацию системы оценки
+    Update evaluation config
+    """
+    try:
+        return await config_service.update_config(current_user.id, data)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-# =====================================================
-# SCHEDULING
-# =====================================================
+# ========== ПЛАНИРОВАНИЕ / SCHEDULING ==========
 
-@router.post("/schedule", response_model=dict)
+
+@evaluation_router.post(
+    "/schedule",
+    response_model=SchedulePresentationsResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Сохранить расписание презентаций",
+)
 async def schedule_presentations(
-    current_user: TeacherDep,
-    service: ServiceDep,
-    schedule_data: list[dict],  # ← Body parameter (sans défaut)
-) -> dict:
-    """Schedule projects for multiple days"""
-    return await service.schedule_projects(schedule_data, teacher_id=current_user.id)
+    data: SchedulePresentationsRequest,
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> SchedulePresentationsResponse:
+    """
+    Сохранить расписание выступлений проектов
+    Save project presentation schedule
+    """
+    try:
+        return await presentation_service.schedule_presentations(current_user.id, data)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.get("/schedule/dates", response_model=list[str])
+@evaluation_router.get(
+    "/schedule/dates",
+    response_model=list[str],
+    summary="Получить список дат с запланированными презентациями",
+)
 async def get_available_dates(
-    current_user: TeacherDep,
-    service: ServiceDep,
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    _current_user: User = Depends(get_current_user),
 ) -> list[str]:
-    """Get all dates with scheduled projects"""
-    return await service.get_available_dates()
+    """
+    Получить все даты, по которым есть расписание презентаций
+    Get all dates that have presentation schedules
+    """
+    return await presentation_service.get_available_dates()
 
 
-@router.get("/schedule/{date}", response_model=list[dict])
-async def get_schedule_by_date(
-    date: str,  # ← Path parameter (sans défaut)
-    current_user: TeacherDep,
-    service: ServiceDep,
-) -> list[dict]:
-    """Get schedule for a specific date"""
-    return await service.get_schedule_by_date(date)
+@evaluation_router.get(
+    "/schedule/{target_date}",
+    response_model=list[ScheduleForDateItem],
+    summary="Получить расписание на выбранную дату",
+)
+async def get_schedule_for_date(
+    target_date: str = Path(..., description="Дата в формате ISO, например 2026-04-01T00:00:00"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    _current_user: User = Depends(get_current_user),
+) -> list[ScheduleForDateItem]:
+    """
+    Получить список проектов, запланированных на дату
+    Get projects scheduled for a given date
+    """
+    try:
+        parsed_date = datetime.fromisoformat(target_date)
+        return await presentation_service.get_schedule_for_date(parsed_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный формат даты") from exc
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.put("/schedule/{date}/reorder", response_model=dict)
+@evaluation_router.put(
+    "/schedule/{target_date}/reorder",
+    response_model=ReorderProjectsResponse,
+    summary="Изменить порядок проектов на дату",
+)
 async def reorder_projects(
-    date: str,  # ← Path parameter (sans défaut)
-    current_user: TeacherDep,
-    service: ServiceDep,
-    project_order: list[int],  # ← Body parameter (sans défaut)
-) -> dict:
-    """Reorder projects for a date"""
-    return await service.reorder_projects(date, project_order, teacher_id=current_user.id)
+    data: ReorderProjectsRequest,
+    target_date: str = Path(..., description="Дата в формате ISO, например 2026-04-01T00:00:00"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> ReorderProjectsResponse:
+    """
+    Изменить порядок проектов на выбранную дату
+    Reorder projects for a selected date
+    """
+    try:
+        parsed_date = datetime.fromisoformat(target_date)
+        return await presentation_service.reorder_projects(current_user.id, parsed_date, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный формат даты") from exc
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-# =====================================================
-# TODAY PROJECTS
-# =====================================================
+# ========== СЕССИИ ПРЕЗЕНТАЦИИ / PRESENTATION SESSIONS ==========
 
-@router.get("/today-projects", response_model=list[dict])
+
+@evaluation_router.get(
+    "/today-projects",
+    response_model=list[TodayProjectItem],
+    summary="Получить проекты сегодняшнего дня",
+)
 async def get_today_projects(
-    current_user: TeacherDep,
-    service: ServiceDep,
-) -> list[dict]:
-    """Get projects scheduled for today"""
-    return await service.get_today_projects()
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+) -> list[TodayProjectItem]:
+    """
+    Получить список проектов, запланированных на сегодня
+    Get today's planned projects
+    """
+    try:
+        return await presentation_service.get_today_projects(current_user.id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.get("/project/{project_id}/current-session", response_model=PresentationSessionResponse | None)
-async def get_current_session(
-    project_id: int,  # ← Path parameter
-    current_user: UserDep,
-    service: ServiceDep,
+@evaluation_router.get(
+    "/projects/{project_id}/current-session",
+    response_model=PresentationSessionResponse | None,
+    summary="Получить текущую активную сессию проекта",
+)
+async def get_current_project_session(
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    include_pending: bool = Query(True, description="Включать сессии со статусом PENDING"),
+    include_active: bool = Query(True, description="Включать сессии со статусом ACTIVE"),
 ) -> PresentationSessionResponse | None:
-    """Get current active session for a project"""
-    return await service.get_current_session(project_id)
+    """
+    Получить текущую активную сессию проекта
+    Get current active project session
+    """
+    try:
+        return await presentation_service.get_current_project_session(
+            current_user_id=current_user.id,
+            project_id=project_id,
+            include_pending=include_pending,
+            include_active=include_active,
+        )
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.post("/projects/{project_id}/skip", response_model=dict)
-async def skip_project(
-    project_id: int,  # ← Path parameter
-    current_user: TeacherDep,
-    service: ServiceDep,
-) -> dict:
-    """Skip a project session"""
-    return await service.skip_project_session(project_id, teacher_id=current_user.id)
-
-
-@router.post("/projects/{project_id}/resume", response_model=dict)
-async def resume_project(
-    project_id: int,  # ← Path parameter
-    current_user: TeacherDep,
-    service: ServiceDep,
-) -> dict:
-    """Resume a skipped project"""
-    return await service.resume_project_session(project_id, teacher_id=current_user.id)
-
-
-# =====================================================
-# PRESENTATION SESSIONS
-# =====================================================
-
-@router.post("/sessions/start/{project_id}", response_model=PresentationSessionStartResponse)
+@evaluation_router.post(
+    "/sessions/start/{project_id}",
+    response_model=PresentationSessionStartResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Начать презентацию проекта",
+)
 async def start_presentation(
-    project_id: int,  # ← Path parameter
-    current_user: TeacherDep,
-    service: ServiceDep,
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
 ) -> PresentationSessionStartResponse:
-    """Start a presentation session"""
-    return await service.start_presentation(project_id, current_user.id)
+    """
+    Начать презентацию проекта и запустить таймер
+    Start project presentation and launch timer
+    """
+    try:
+        return await presentation_service.start_presentation(current_user.id, project_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.post("/sessions/{session_id}/open-evaluation", response_model=PresentationSessionOpenResponse)
+@evaluation_router.post(
+    "/sessions/{session_id}/open-evaluation",
+    response_model=PresentationSessionOpenResponse,
+    summary="Открыть окно оценивания комиссии",
+)
 async def open_evaluation(
-    session_id: int,  # ← Path parameter
-    current_user: TeacherDep,
-    service: ServiceDep,
+    session_id: int = Path(..., ge=1, description="ID сессии презентации"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
 ) -> PresentationSessionOpenResponse:
-    """Open evaluation for a session"""
-    return await service.open_evaluation(session_id)
+    """
+    Открыть окно оценивания для комиссии
+    Open commission evaluation window
+    """
+    try:
+        return await presentation_service.open_evaluation(current_user.id, session_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.get("/sessions/{session_id}", response_model=PresentationSessionResponse)
+@evaluation_router.get(
+    "/sessions/{session_id}",
+    response_model=PresentationSessionResponse,
+    summary="Получить статус сессии презентации",
+)
 async def get_session_status(
-    session_id: int,  # ← Path parameter
-    current_user: UserDep,
-    service: ServiceDep,
+    session_id: int = Path(..., ge=1, description="ID сессии презентации"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
 ) -> PresentationSessionResponse:
-    """Get session status"""
-    return await service.get_session_status(session_id)
+    """
+    Получить текущий статус сессии
+    Get session status
+    """
+    try:
+        return await presentation_service.get_session_status(current_user.id, session_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.post("/sessions/{session_id}/complete", response_model=PresentationSessionResponse)
+@evaluation_router.post(
+    "/sessions/{session_id}/complete",
+    response_model=PresentationSessionResponse,
+    summary="Завершить сессию презентации",
+)
 async def complete_session(
-    session_id: int,  # ← Path parameter
-    current_user: TeacherDep,
-    service: ServiceDep,
+    session_id: int = Path(..., ge=1, description="ID сессии презентации"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
 ) -> PresentationSessionResponse:
-    """Complete a session (mark as EVALUATED)"""
-    return await service.complete_session(session_id)
+    """
+    Завершить презентацию и перевести сессию в статус EVALUATED
+    Complete presentation session and mark it as evaluated
+    """
+    try:
+        return await presentation_service.complete_session(current_user.id, session_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.post("/sessions/{session_id}/finalize", response_model=dict)
+@evaluation_router.post(
+    "/sessions/{session_id}/finalize",
+    response_model=ProjectSessionActionResponse,
+    summary="Финализировать сессию",
+)
 async def finalize_session(
-    session_id: int,  # ← Path parameter
-    current_user: TeacherDep,
-    service: ServiceDep,
-) -> dict:
-    """Mark session as final"""
-    return await service.finalize_session(session_id, current_user.id)
+    session_id: int = Path(..., ge=1, description="ID сессии презентации"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> ProjectSessionActionResponse:
+    """
+    Отметить сессию как финальную для итогового расчёта
+    Mark session as final for final grade calculation
+    """
+    try:
+        return await presentation_service.finalize_session(current_user.id, session_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-# =====================================================
-# COMMISSION EVALUATION
-# =====================================================
+@evaluation_router.post(
+    "/projects/{project_id}/skip",
+    response_model=ProjectSessionActionResponse,
+    summary="Пропустить проект",
+)
+async def skip_project(
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> ProjectSessionActionResponse:
+    """
+    Пропустить проект текущего дня
+    Skip today's project
+    """
+    try:
+        return await presentation_service.skip_project(current_user.id, project_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
-@router.post("/commission/submit", response_model=CommissionEvaluationResponse)
+
+@evaluation_router.post(
+    "/projects/{project_id}/resume",
+    response_model=ProjectSessionActionResponse,
+    summary="Возобновить пропущенный проект",
+)
+async def resume_project(
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> ProjectSessionActionResponse:
+    """
+    Возобновить ранее пропущенный проект
+    Resume previously skipped project
+    """
+    try:
+        return await presentation_service.resume_project(current_user.id, project_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
+
+
+# ========== ОЦЕНКА КОМИССИИ / COMMISSION EVALUATION ==========
+
+
+@evaluation_router.post(
+    "/commission",
+    response_model=CommissionEvaluationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Отправить оценку комиссии",
+)
 async def submit_commission_evaluation(
     data: CommissionEvaluationSubmit,
-    current_user: CommissionDep,
-    service: ServiceDep,
+    commission_service: CommissionEvaluationService = Depends(get_commission_evaluation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
 ) -> CommissionEvaluationResponse:
-    """Submit commission evaluation"""
-    data.commissioner_id = current_user.id
+    """
+    Отправить форму экспертной оценки комиссии
+    Submit commission evaluation form
+    """
     try:
-        return await service.submit_commission_evaluation(data)
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
+        return await commission_service.submit_commission_evaluation(current_user.id, data)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.get("/commission/sessions/{session_id}", response_model=list[CommissionEvaluationResponse])
+@evaluation_router.get(
+    "/commission/sessions/{session_id}",
+    response_model=CommissionEvaluationsListResponse,
+    summary="Получить все оценки комиссии по сессии",
+)
 async def get_commission_evaluations(
-    session_id: int,
-    current_user: UserDep,  # ← Gardé pour l'audit, même si non utilisé
-    service: ServiceDep,
-) -> list[CommissionEvaluationResponse]:
-    """Get all commission evaluations for a session"""
-    # TODO: Vérifier les droits (enseignant ou participant)
-    return await service.get_commission_evaluations(session_id)
+    session_id: int = Path(..., ge=1, description="ID сессии презентации"),
+    commission_service: CommissionEvaluationService = Depends(get_commission_evaluation_service),
+    current_user: User = Depends(get_current_user),
+) -> CommissionEvaluationsListResponse:
+    """
+    Получить список всех оценок комиссии для выбранной сессии
+    Get all commission evaluations for selected session
+    """
+    try:
+        return await commission_service.get_commission_evaluations(current_user.id, session_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.get("/commission/sessions/{session_id}/average", response_model=float | None)
+@evaluation_router.get(
+    "/commission/sessions/{session_id}/average",
+    response_model=CommissionAverageResponse,
+    summary="Получить среднюю оценку комиссии",
+)
 async def get_commission_average(
-    session_id: int,
-    current_user: UserDep,
-    service: ServiceDep,
-) -> float | None:
-    """Get average commission score for a session"""
-    return await service.get_commission_average(session_id)
-
-
-# =====================================================
-# PEER EVALUATION
-# =====================================================
-
-@router.post("/peer/submit", response_model=PeerEvaluationResponse)
-async def submit_peer_evaluation(
-    data: PeerEvaluationSubmit,
-    current_user: UserDep,
-    service: ServiceDep,
-) -> PeerEvaluationResponse:
-    """Submit peer evaluation"""
-    if data.evaluator_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Cannot evaluate for another user")
+    session_id: int = Path(..., ge=1, description="ID сессии презентации"),
+    commission_service: CommissionEvaluationService = Depends(get_commission_evaluation_service),
+    current_user: User = Depends(get_current_user),
+) -> CommissionAverageResponse:
+    """
+    Получить среднюю оценку комиссии по сессии
+    Get average commission score by session
+    """
     try:
-        return await service.submit_peer_evaluation(data)
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
+        return await commission_service.get_commission_average(current_user.id, session_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-@router.get("/peer/leader-feedback/{project_id}", response_model=PeerEvaluationLeaderSummary)
+# ========== ВЗАИМНАЯ ОЦЕНКА / PEER EVALUATION ==========
+
+
+@evaluation_router.get(
+    "/peer/sessions/{session_id}/deadline",
+    response_model=PeerDeadlineResponse,
+    summary="Получить дедлайн взаимной оценки",
+)
+async def get_peer_deadline(
+    session_id: int = Path(..., ge=1, description="ID сессии презентации"),
+    presentation_service: PresentationService = Depends(get_presentation_service),
+    current_user: User = Depends(get_current_user),
+) -> PeerDeadlineResponse:
+    """
+    Получить срок окончания взаимной оценки
+    Get peer evaluation deadline
+    """
+    try:
+        return await presentation_service.get_peer_deadline(current_user.id, session_id)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
+
+
+@evaluation_router.post(
+    "/peer/leader-to-member",
+    response_model=PeerEvaluationSubmitResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Руководитель оценивает участника",
+)
+async def submit_leader_to_member_evaluation(
+    data: LeaderToMemberEvaluationSubmit,
+    peer_service: PeerEvaluationService = Depends(get_peer_evaluation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> PeerEvaluationSubmitResponse:
+    """
+    Отправить оценку участнику от руководителя проекта
+    Submit leader-to-member evaluation
+    """
+    try:
+        return await peer_service.submit_leader_to_member(current_user.id, data)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
+
+
+@evaluation_router.post(
+    "/peer/member-to-leader",
+    response_model=PeerEvaluationSubmitResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Участник оценивает руководителя",
+)
+async def submit_member_to_leader_evaluation(
+    data: MemberToLeaderEvaluationSubmit,
+    peer_service: PeerEvaluationService = Depends(get_peer_evaluation_service),
+    current_user: User = Depends(get_current_user),
+    _audit=Depends(setup_audit),
+) -> PeerEvaluationSubmitResponse:
+    """
+    Отправить анонимную оценку руководителю от участника
+    Submit anonymous member-to-leader evaluation
+    """
+    try:
+        return await peer_service.submit_member_to_leader(current_user.id, data)
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
+
+
+@evaluation_router.get(
+    "/peer/projects/{project_id}/leader-feedback",
+    response_model=PeerEvaluationLeaderSummary,
+    summary="Получить анонимную сводку для руководителя",
+)
 async def get_leader_feedback(
-    project_id: int,
-    current_user: UserDep,
-    service: ServiceDep,
-    session_id: int = Query(None),
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    peer_service: PeerEvaluationService = Depends(get_peer_evaluation_service),
+    current_user: User = Depends(get_current_user),
+    session_id: int | None = Query(None, description="ID сессии"),
 ) -> PeerEvaluationLeaderSummary:
-    """Get anonymous feedback for leader"""
-    leader_id = await service.get_project_leader_id(project_id)
-    
-    # ✅ Utiliser la vérification de rôle plutôt que ID fixe
-    is_leader = current_user.id == leader_id
-    is_teacher = getattr(current_user, "is_teacher", False) or current_user.id == 1
-    
-    if not (is_leader or is_teacher):
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return await service.get_leader_feedback(project_id, leader_id, session_id)
-
-
-@router.get("/peer/member-feedback/{project_id}/{member_id}", response_model=list[dict])
-async def get_member_feedback(
-    project_id: int,
-    member_id: int,
-    current_user: UserDep,
-    service: ServiceDep,
-    session_id: int = Query(None),
-) -> list[dict]:
-    """Get member feedback from leader"""
-    leader_id = await service.get_project_leader_id(project_id)
-    
-    is_self = current_user.id == member_id
-    is_leader = current_user.id == leader_id
-    is_teacher = getattr(current_user, "is_teacher", False) or current_user.id == 1
-    
-    if not (is_self or is_leader or is_teacher):
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return await service.get_member_feedback(project_id, member_id, session_id)
-
-
-@router.get("/sessions/{session_id}/peer-deadline", response_model=dict)
-async def get_peer_evaluation_deadline(
-    session_id: int,
-    current_user: UserDep,
-    service: ServiceDep,
-) -> dict:
-    """Get deadline for peer evaluations"""
-    deadline = await service.get_peer_evaluation_deadline(session_id)
-    remaining_days = await service.get_remaining_peer_evaluation_days(session_id)
-    return {
-        "deadline": deadline.isoformat() if deadline else None,
-        "remaining_days": remaining_days,
-        "is_expired": remaining_days == 0 if remaining_days is not None else None,
-    }
-
-# =====================================================
-# FINAL GRADE
-# =====================================================
-
-@router.post("/final-grade", response_model=FinalGradeResponse)
-async def calculate_final_grade(
-    request: FinalGradeRequest,  # ← Body parameter
-    current_user: UserDep,
-    service: ServiceDep,
-) -> FinalGradeResponse:
-    """Calculate final grade for a student"""
+    """
+    Получить анонимную сводку оценок руководителя
+    Get anonymous summary for project leader
+    """
     try:
-        role = UserRole(request.role)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid role: {request.role}")
-
-    return await service.calculate_final_grade(
-        project_id=request.project_id,
-        student_id=request.student_id,
-        role=role,
-    )
+        return await peer_service.get_leader_feedback(
+            current_user_id=current_user.id,
+            project_id=project_id,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
 
-# =====================================================
-# STATUS
-# =====================================================
+@evaluation_router.get(
+    "/peer/projects/{project_id}/members/{member_id}/feedback",
+    response_model=PeerEvaluationMemberFeedbackListResponse,
+    summary="Получить обратную связь участнику",
+)
+async def get_member_feedback(
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    member_id: int = Path(..., ge=1, description="ID участника"),
+    peer_service: PeerEvaluationService = Depends(get_peer_evaluation_service),
+    current_user: User = Depends(get_current_user),
+    session_id: int | None = Query(None, description="ID сессии"),
+) -> PeerEvaluationMemberFeedbackListResponse:
+    """
+    Получить оценки участника, выставленные руководителем
+    Get member feedback from project leader
+    """
+    try:
+        return await peer_service.get_member_feedback(
+            current_user_id=current_user.id,
+            project_id=project_id,
+            member_id=member_id,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
 
-@router.get("/status/project/{project_id}", response_model=ProjectEvaluationStatus)
+
+# ========== ИТОГОВЫЕ РЕЗУЛЬТАТЫ / FINAL RESULTS ==========
+
+
+@evaluation_router.post(
+    "/final-grade",
+    response_model=FinalGradeResponse,
+    summary="Рассчитать итоговую оценку",
+)
+async def calculate_final_grade(
+    data: FinalGradeRequest,
+    final_grade_service: FinalGradeService = Depends(get_final_grade_service),
+    current_user: User = Depends(get_current_user),
+) -> FinalGradeResponse:
+    """
+    Рассчитать итоговую оценку студента
+    Calculate final grade for a student
+    """
+    try:
+        return await final_grade_service.calculate_final_grade(
+            current_user_id=current_user.id,
+            project_id=data.project_id,
+            student_id=data.student_id,
+            role=data.role,
+        )
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
+
+
+@evaluation_router.get(
+    "/projects/{project_id}/status",
+    response_model=ProjectEvaluationStatus,
+    summary="Получить статус оценивания проекта",
+)
 async def get_project_evaluation_status(
-    project_id: int,  # ← Path parameter
-    current_user: UserDep,
-    service: ServiceDep,
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    status_service: ProjectEvaluationStatusService = Depends(get_project_evaluation_status_service),
+    current_user: User = Depends(get_current_user),
 ) -> ProjectEvaluationStatus:
-    """Get project evaluation status"""
-    return await service.get_project_evaluation_status(project_id)
+    """
+    Получить сводный статус оценивания проекта
+    Get aggregated project evaluation status
+    """
+    try:
+        return await status_service.get_project_evaluation_status(
+            current_user_id=current_user.id,
+            project_id=project_id,
+        )
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
