@@ -44,6 +44,7 @@ class User(Base):
         back_populates="participant",
         cascade="all, delete-orphan",
     )
+    tasks: Mapped[list[Task]] = relationship(secondary="task_assignee", back_populates="assignees")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

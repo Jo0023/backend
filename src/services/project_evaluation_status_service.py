@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from src.core.exceptions import NotFoundError
 from src.repository.commission_evaluation_repository import CommissionEvaluationRepository
 from src.repository.peer_evaluation_repository import PeerEvaluationRepository
 from src.repository.presentation_session_repository import PresentationSessionRepository
@@ -35,7 +34,7 @@ class ProjectEvaluationStatusService:
         Получить сводный статус оценивания проекта
         Get aggregated evaluation status for project
         """
-        await self.access_service.assert_project_member_or_leader(project_id, current_user_id)
+        await self.access_service.assert_project_member_or_leader_or_teacher(project_id, current_user_id)
         project = await self.access_service.get_project_or_raise(project_id)
 
         session = await self.session_repository.get_current_session(project_id)

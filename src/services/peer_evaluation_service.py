@@ -207,12 +207,16 @@ class PeerEvaluationService:
         session_id: int | None = None,
     ) -> PeerEvaluationLeaderSummary:
         """
-        Получить анонимную обратную связь для руководителя
-        Get anonymous feedback for leader
+        Получить обратную связь для руководителя.
+        Руководитель видит агрегированную анонимную сводку.
+        Преподаватель тоже может просматривать эту сводку.
+        Get leader feedback summary.
         """
         leader_id = await self.access_service.get_project_leader_id(project_id)
-        if current_user_id != leader_id:
-            raise PermissionError("Только руководитель проекта может просматривать эту сводку")
+        is_teacher = await self.access_service.is_teacher(current_user_id)
+
+        if not is_teacher and current_user_id != leader_id:
+            raise PermissionError("Недостаточно прав для просмотра этой сводки")
 
         if session_id is None:
             session = await self.session_repository.get_final_session(project_id)
@@ -265,7 +269,7 @@ class PeerEvaluationService:
         Получить обратную связь участнику от руководителя
         Get member feedback from leader
         """
-        await self.access_service.assert_self_or_project_leader(
+        await self.access_service.assert_self_or_project_leader_or_teacher(
             project_id=project_id,
             current_user_id=current_user_id,
             target_user_id=member_id,

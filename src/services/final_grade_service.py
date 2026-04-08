@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import NotFoundError, ValidationError
 from src.repository.commission_evaluation_repository import CommissionEvaluationRepository
 from src.repository.peer_evaluation_repository import PeerEvaluationRepository
 from src.repository.presentation_session_repository import PresentationSessionRepository
@@ -55,6 +55,39 @@ class FinalGradeService:
             return 4
         return 5
 
+    @staticmethod
+    def _average(values: list[float]) -> float | None:
+        """
+        Посчитать среднее значение
+        Calculate average value
+        """
+        if not values:
+            return None
+        return round(sum(values) / len(values), 2)
+
+    async def _validate_student_role_in_project(
+        self,
+        project_id: int,
+        student_id: int,
+        role: str,
+    ) -> None:
+        """
+        Проверить, что студент действительно относится к проекту
+        Validate that the student really belongs to the project
+        """
+        if role not in {"leader", "member"}:
+            raise ValidationError("Поле role должно иметь значение 'leader' или 'member'")
+
+        leader_id = await self.access_service.get_project_leader_id(project_id)
+        member_ids = await self.access_service.get_project_member_ids(project_id)
+
+        if role == "leader":
+            if student_id != leader_id:
+                raise ValidationError("Указанный student_id не является руководителем данного проекта")
+        else:
+            if student_id not in member_ids:
+                raise ValidationError("Указанный student_id не является участником данного проекта")
+
     async def calculate_final_grade(
         self,
         current_user_id: int,
@@ -66,10 +99,16 @@ class FinalGradeService:
         Рассчитать итоговую оценку
         Calculate final grade
         """
-        await self.access_service.assert_self_or_project_leader(
+        await self.access_service.assert_self_or_project_leader_or_teacher(
             project_id=project_id,
             current_user_id=current_user_id,
             target_user_id=student_id,
+        )
+
+        await self._validate_student_role_in_project(
+            project_id=project_id,
+            student_id=student_id,
+            role=role,
         )
 
         session = await self._resolve_reference_session(project_id)
@@ -88,22 +127,17 @@ class FinalGradeService:
                 session_id=session.id,
             )
 
-            criterion_means: dict[str, list[int]] = {}
+            all_scores: list[float] = []
             for evaluation in evaluations:
                 for row in evaluation.criterion_scores:
-                    criterion_means.setdefault(row.criterion.name, []).append(row.score)
+                    all_scores.append(float(row.score))
 
-            averages = []
-            for _, values in criterion_means.items():
-                if values:
-                    averages.append(sum(values) / len(values))
-
-            peer_grade = round(sum(averages) / len(averages), 2) if averages else None
+            peer_grade = self._average(all_scores)
 
             if peer_grade is not None and commission_grade > 0:
                 final_grade = round((commission_grade + peer_grade) / 2, 2)
             elif peer_grade is not None:
-                final_grade = round(peer_grade, 2)
+                final_grade = peer_grade
             else:
                 final_grade = round(commission_grade, 2)
 
@@ -114,18 +148,17 @@ class FinalGradeService:
                 session_id=session.id,
             )
 
-            evaluation_averages = []
+            all_scores: list[float] = []
             for evaluation in evaluations:
-                values = [row.score for row in evaluation.criterion_scores]
-                if values:
-                    evaluation_averages.append(sum(values) / len(values))
+                for row in evaluation.criterion_scores:
+                    all_scores.append(float(row.score))
 
-            leader_grade = round(sum(evaluation_averages) / len(evaluation_averages), 2) if evaluation_averages else None
+            leader_grade = self._average(all_scores)
 
             if leader_grade is not None and commission_grade > 0:
                 final_grade = round((commission_grade + leader_grade) / 2, 2)
             elif leader_grade is not None:
-                final_grade = round(leader_grade, 2)
+                final_grade = leader_grade
             else:
                 final_grade = round(commission_grade, 2)
 

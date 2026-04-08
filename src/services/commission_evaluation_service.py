@@ -44,7 +44,14 @@ class CommissionEvaluationService:
         """
         Отправить оценку комиссии
         Submit commission evaluation
+
+        ВАЖНО:
+        Только пользователь с глобальной ролью commissioner
+        может отправлять экспертную оценку комиссии.
+        Only a user with commissioner global role can submit commission evaluation.
         """
+        await self.access_service.assert_commissioner(current_user_id)
+
         session = await self.session_repository.get_session_by_id(data.session_id)
         if not session:
             raise NotFoundError(f"Сессия с ID {data.session_id} не найдена")
@@ -143,7 +150,10 @@ class CommissionEvaluationService:
         if not session:
             raise NotFoundError(f"Сессия с ID {session_id} не найдена")
 
-        await self.access_service.assert_project_member_or_leader(session.project_id, current_user_id)
+        await self.access_service.assert_project_member_or_leader_or_teacher(
+            session.project_id,
+            current_user_id,
+        )
 
         items = await self.commission_repository.get_commission_evaluations_by_session(session_id)
 
@@ -177,7 +187,10 @@ class CommissionEvaluationService:
         if not session:
             raise NotFoundError(f"Сессия с ID {session_id} не найдена")
 
-        await self.access_service.assert_project_member_or_leader(session.project_id, current_user_id)
+        await self.access_service.assert_project_member_or_leader_or_teacher(
+            session.project_id,
+            current_user_id,
+        )
 
         average = await self.commission_repository.get_commission_average_by_session(session_id)
         return CommissionAverageResponse(session_id=session_id, average_score=average)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, date, datetime, time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import selectinload
@@ -18,18 +18,39 @@ class EvaluationScheduleRepository:
     Handles only persistence logic for presentation_schedule table.
     """
 
+    DEFAULT_TIMEZONE = "Europe/Moscow"
+
     def __init__(self, uow: IUnitOfWork) -> None:
         self.uow = uow
 
-    @staticmethod
-    def _day_bounds_utc(target: date | datetime, tz_name: str = "Europe/Moscow") -> tuple[datetime, datetime]:
+    @classmethod
+    def _get_timezone(cls, tz_name: str | None = None) -> ZoneInfo:
         """
-        Получить границы локального дня в UTC / Convert local day boundaries to UTC
+        Получить объект временной зоны / Get timezone object
         """
-        local_tz = ZoneInfo(tz_name)
+        timezone_name = tz_name or cls.DEFAULT_TIMEZONE
+        try:
+            return ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            return ZoneInfo("UTC")
+
+    @classmethod
+    def _day_bounds_utc(
+        cls,
+        target: date | datetime,
+        tz_name: str | None = None,
+    ) -> tuple[datetime, datetime]:
+        """
+        Получить границы локального дня в UTC
+        Convert local day boundaries to UTC
+        """
+        local_tz = cls._get_timezone(tz_name)
 
         if isinstance(target, datetime):
-            local_date = target.astimezone(local_tz).date() if target.tzinfo else target.date()
+            if target.tzinfo is None:
+                local_date = target.date()
+            else:
+                local_date = target.astimezone(local_tz).date()
         else:
             local_date = target
 
@@ -60,7 +81,8 @@ class EvaluationScheduleRepository:
 
     async def clear_schedule_for_day(self, target_day: date | datetime) -> int:
         """
-        Удалить все записи расписания за день / Delete all schedule entries for a local day
+        Удалить все записи расписания за день
+        Delete all schedule entries for a local day
         """
         start_utc, end_utc = self._day_bounds_utc(target_day)
 
@@ -82,7 +104,8 @@ class EvaluationScheduleRepository:
 
     async def get_schedule_for_day(self, target_day: date | datetime) -> list[PresentationSchedule]:
         """
-        Получить расписание на день / Get schedule for a local day
+        Получить расписание на день
+        Get schedule for a local day
         """
         start_utc, end_utc = self._day_bounds_utc(target_day)
 
@@ -99,14 +122,28 @@ class EvaluationScheduleRepository:
         )
         return list(result.scalars().all())
 
-    async def get_distinct_schedule_days(self) -> list[datetime]:
+    async def get_distinct_schedule_days(self, tz_name: str | None = None) -> list[date]:
         """
-        Получить все уникальные даты расписания / Get all distinct presentation dates
+        Получить все уникальные локальные даты расписания
+        Get all distinct local schedule dates
         """
+        local_tz = self._get_timezone(tz_name)
+
         result = await self.uow.session.execute(
             select(PresentationSchedule.presentation_date).order_by(PresentationSchedule.presentation_date.asc())
         )
-        return list(result.scalars().all())
+        datetimes = list(result.scalars().all())
+
+        unique_days: list[date] = []
+        seen: set[date] = set()
+
+        for dt_value in datetimes:
+            local_day = dt_value.astimezone(local_tz).date()
+            if local_day not in seen:
+                seen.add(local_day)
+                unique_days.append(local_day)
+
+        return unique_days
 
     async def reorder_schedule(
         self,
@@ -114,7 +151,8 @@ class EvaluationScheduleRepository:
         project_ids: list[int],
     ) -> list[PresentationSchedule]:
         """
-        Изменить порядок проектов на день / Reorder projects for a local day
+        Изменить порядок проектов на день
+        Reorder projects for a local day
         """
         schedules = await self.get_schedule_for_day(target_day)
         schedule_by_project_id = {item.project_id: item for item in schedules}
@@ -133,7 +171,8 @@ class EvaluationScheduleRepository:
         target_day: date | datetime,
     ) -> PresentationSchedule | None:
         """
-        Получить запись расписания проекта за день / Get project schedule entry for a local day
+        Получить запись расписания проекта за день
+        Get project schedule entry for a local day
         """
         start_utc, end_utc = self._day_bounds_utc(target_day)
 
@@ -156,7 +195,8 @@ class EvaluationScheduleRepository:
         target_day: date | datetime,
     ) -> PresentationSchedule | None:
         """
-        Отметить проект как пропущенный / Mark scheduled project as skipped
+        Отметить проект как пропущенный
+        Mark scheduled project as skipped
         """
         schedule = await self.get_schedule_entry_for_day(project_id, target_day)
         if not schedule:
@@ -173,7 +213,8 @@ class EvaluationScheduleRepository:
         target_day: date | datetime,
     ) -> PresentationSchedule | None:
         """
-        Вернуть пропущенный проект в состояние PENDING / Resume skipped scheduled project
+        Вернуть пропущенный проект в состояние PENDING
+        Resume skipped scheduled project
         """
         schedule = await self.get_schedule_entry_for_day(project_id, target_day)
         if not schedule:
@@ -187,10 +228,11 @@ class EvaluationScheduleRepository:
         await self.uow.session.refresh(schedule)
         return schedule
 
-    async def get_today_planned_projects(self, tz_name: str = "Europe/Moscow") -> list[PresentationSchedule]:
+    async def get_today_planned_projects(self, tz_name: str | None = None) -> list[PresentationSchedule]:
         """
-        Получить проекты, запланированные на сегодня / Get today's planned projects
+        Получить проекты, запланированные на сегодня
+        Get today's planned projects
         """
-        local_tz = ZoneInfo(tz_name)
+        local_tz = self._get_timezone(tz_name)
         today_local = datetime.now(local_tz).date()
         return await self.get_schedule_for_day(today_local)

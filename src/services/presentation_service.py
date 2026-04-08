@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from src.core.exceptions import NotFoundError, ValidationError
+from src.core.exceptions import NotFoundError, PermissionError, ValidationError
 from src.repository.config_repository import ConfigRepository
 from src.repository.evaluation_schedule_repository import EvaluationScheduleRepository
 from src.repository.presentation_session_repository import PresentationSessionRepository
@@ -29,6 +29,8 @@ class PresentationService:
     Presentation and scheduling service
     """
 
+    DEFAULT_TIMEZONE = "Europe/Moscow"
+
     def __init__(
         self,
         schedule_repository: EvaluationScheduleRepository,
@@ -40,6 +42,46 @@ class PresentationService:
         self.session_repository = session_repository
         self.config_repository = config_repository
         self.access_service = access_service
+
+    @staticmethod
+    def _get_timezone(tz_name: str = "Europe/Moscow") -> ZoneInfo:
+        """
+        Получить временную зону
+        Get timezone object
+        """
+        try:
+            return ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            return ZoneInfo("UTC")
+
+    @classmethod
+    def _to_utc(cls, dt_value: datetime, tz_name: str = DEFAULT_TIMEZONE) -> datetime:
+        """
+        Нормализовать datetime в UTC
+        Normalize datetime to UTC
+        """
+        local_tz = cls._get_timezone(tz_name)
+
+        if dt_value.tzinfo is None:
+            localized = dt_value.replace(tzinfo=local_tz)
+        else:
+            localized = dt_value.astimezone(local_tz)
+
+        return localized.astimezone(UTC)
+
+    async def _assert_teacher_or_project_member(
+        self,
+        current_user_id: int,
+        project_id: int,
+    ) -> None:
+        """
+        Разрешить доступ преподавателю или участнику проекта
+        Allow access for teacher or project participant
+        """
+        try:
+            await self.access_service.assert_teacher(current_user_id)
+        except PermissionError:
+            await self.access_service.assert_project_member_or_leader(project_id, current_user_id)
 
     async def schedule_presentations(
         self,
@@ -56,6 +98,7 @@ class PresentationService:
             raise ValidationError("Список планирования не может быть пустым")
 
         grouped_by_day: dict[str, list] = {}
+
         for item in data.items:
             key = item.presentation_date.date().isoformat()
             grouped_by_day.setdefault(key, []).append(item)
@@ -65,15 +108,16 @@ class PresentationService:
             if len(orders) != len(set(orders)):
                 raise ValidationError("Порядок выступлений в один день не должен повторяться")
 
-        for _, items_in_day in grouped_by_day.items():
+        for items_in_day in grouped_by_day.values():
             first_item = items_in_day[0]
             await self.schedule_repository.clear_schedule_for_day(first_item.presentation_date)
 
             for item in sorted(items_in_day, key=lambda x: x.order_index):
                 await self.access_service.get_project_or_raise(item.project_id)
+
                 await self.schedule_repository.schedule_project(
                     project_id=item.project_id,
-                    presentation_date=item.presentation_date,
+                    presentation_date=self._to_utc(item.presentation_date),
                     order_index=item.order_index,
                 )
 
@@ -89,16 +133,7 @@ class PresentationService:
         Get all dates that have schedule entries
         """
         dates = await self.schedule_repository.get_distinct_schedule_days()
-        unique = []
-        seen = set()
-
-        for dt in dates:
-            key = dt.date().isoformat()
-            if key not in seen:
-                seen.add(key)
-                unique.append(key)
-
-        return unique
+        return [day.isoformat() for day in dates]
 
     async def get_schedule_for_date(self, target_date: datetime) -> list[ScheduleForDateItem]:
         """
@@ -160,7 +195,7 @@ class PresentationService:
     async def get_today_projects(
         self,
         current_user_id: int,
-        tz_name: str = "Europe/Moscow",
+        tz_name: str = DEFAULT_TIMEZONE,
     ) -> list[TodayProjectItem]:
         """
         Получить список проектов сегодняшнего дня
@@ -211,7 +246,7 @@ class PresentationService:
         Получить текущую активную сессию проекта
         Get current project session
         """
-        await self.access_service.assert_project_member_or_leader(project_id, current_user_id)
+        await self._assert_teacher_or_project_member(current_user_id, project_id)
 
         sessions = await self.session_repository.get_sessions_by_project(project_id)
         allowed_statuses: list[str] = []
@@ -320,7 +355,7 @@ class PresentationService:
         if not session:
             raise NotFoundError(f"Сессия с ID {session_id} не найдена")
 
-        await self.access_service.assert_project_member_or_leader(session.project_id, current_user_id)
+        await self._assert_teacher_or_project_member(current_user_id, session.project_id)
         return PresentationSessionResponse.model_validate(session)
 
     async def complete_session(
@@ -383,7 +418,7 @@ class PresentationService:
         self,
         current_user_id: int,
         project_id: int,
-        tz_name: str = "Europe/Moscow",
+        tz_name: str = DEFAULT_TIMEZONE,
     ) -> ProjectSessionActionResponse:
         """
         Пропустить проект текущего дня
@@ -392,7 +427,7 @@ class PresentationService:
         await self.access_service.assert_teacher(current_user_id)
         project = await self.access_service.get_project_or_raise(project_id)
 
-        local_tz = ZoneInfo(tz_name)
+        local_tz = self._get_timezone(tz_name)
         today_local = datetime.now(local_tz).date()
 
         session = await self.session_repository.get_today_session(project_id, tz_name=tz_name)
@@ -423,7 +458,7 @@ class PresentationService:
         self,
         current_user_id: int,
         project_id: int,
-        tz_name: str = "Europe/Moscow",
+        tz_name: str = DEFAULT_TIMEZONE,
     ) -> ProjectSessionActionResponse:
         """
         Возобновить пропущенный проект
@@ -432,7 +467,7 @@ class PresentationService:
         await self.access_service.assert_teacher(current_user_id)
         project = await self.access_service.get_project_or_raise(project_id)
 
-        local_tz = ZoneInfo(tz_name)
+        local_tz = self._get_timezone(tz_name)
         today_local = datetime.now(local_tz).date()
 
         session = await self.session_repository.get_today_session(project_id, tz_name=tz_name)
@@ -470,7 +505,7 @@ class PresentationService:
         if not session:
             raise NotFoundError(f"Сессия с ID {session_id} не найдена")
 
-        await self.access_service.assert_project_member_or_leader(session.project_id, current_user_id)
+        await self._assert_teacher_or_project_member(current_user_id, session.project_id)
 
         if not session.presentation_started_at:
             return PeerDeadlineResponse(
@@ -484,14 +519,16 @@ class PresentationService:
         deadline = session.presentation_started_at + timedelta(days=config.peer_evaluation_days)
 
         now = datetime.now(UTC)
-        if now > deadline:
+        is_expired = now > deadline
+
+        if is_expired:
             remaining_days = 0
         else:
-            remaining_days = (deadline - now).days
+            remaining_days = max((deadline - now).days, 0)
 
         return PeerDeadlineResponse(
             session_id=session_id,
             deadline=deadline,
             remaining_days=remaining_days,
-            is_expired=(remaining_days == 0 if remaining_days is not None else None),
+            is_expired=is_expired,
         )

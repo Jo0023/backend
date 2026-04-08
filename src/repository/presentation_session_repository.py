@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import selectinload
@@ -18,18 +18,38 @@ class PresentationSessionRepository:
     Handles only persistence logic for presentation_sessions table.
     """
 
+    DEFAULT_TIMEZONE = "Europe/Moscow"
+
     def __init__(self, uow: IUnitOfWork) -> None:
         self.uow = uow
 
-    @staticmethod
-    def _day_bounds_utc(target: date | datetime, tz_name: str = "Europe/Moscow") -> tuple[datetime, datetime]:
+    @classmethod
+    def _get_timezone(cls, tz_name: str | None = None) -> ZoneInfo:
+        """
+        Получить объект временной зоны / Get timezone object
+        """
+        timezone_name = tz_name or cls.DEFAULT_TIMEZONE
+        try:
+            return ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            return ZoneInfo("UTC")
+
+    @classmethod
+    def _day_bounds_utc(
+        cls,
+        target: date | datetime,
+        tz_name: str | None = None,
+    ) -> tuple[datetime, datetime]:
         """
         Получить границы локального дня в UTC / Convert local day boundaries to UTC
         """
-        local_tz = ZoneInfo(tz_name)
+        local_tz = cls._get_timezone(tz_name)
 
         if isinstance(target, datetime):
-            local_date = target.astimezone(local_tz).date() if target.tzinfo else target.date()
+            if target.tzinfo is None:
+                local_date = target.date()
+            else:
+                local_date = target.astimezone(local_tz).date()
         else:
             local_date = target
 
@@ -80,7 +100,7 @@ class PresentationSessionRepository:
         result = await self.uow.session.execute(
             select(PresentationSession)
             .where(PresentationSession.project_id == project_id)
-            .order_by(PresentationSession.created_at.desc())
+            .order_by(PresentationSession.created_at.desc(), PresentationSession.id.desc())
             .options(
                 selectinload(PresentationSession.project),
                 selectinload(PresentationSession.teacher),
@@ -100,7 +120,8 @@ class PresentationSessionRepository:
                     PresentationSession.status.in_(["PENDING", "ACTIVE"]),
                 )
             )
-            .order_by(PresentationSession.created_at.desc())
+            .order_by(PresentationSession.created_at.desc(), PresentationSession.id.desc())
+            .limit(1)
             .options(
                 selectinload(PresentationSession.project),
                 selectinload(PresentationSession.teacher),
@@ -111,12 +132,12 @@ class PresentationSessionRepository:
     async def get_today_session(
         self,
         project_id: int,
-        tz_name: str = "Europe/Moscow",
+        tz_name: str | None = None,
     ) -> PresentationSession | None:
         """
         Получить сегодняшнюю сессию проекта / Get today's session for project
         """
-        local_tz = ZoneInfo(tz_name)
+        local_tz = self._get_timezone(tz_name)
         today_local = datetime.now(local_tz).date()
         start_utc, end_utc = self._day_bounds_utc(today_local, tz_name=tz_name)
 
@@ -129,7 +150,8 @@ class PresentationSessionRepository:
                     PresentationSession.created_at <= end_utc,
                 )
             )
-            .order_by(PresentationSession.created_at.desc())
+            .order_by(PresentationSession.created_at.desc(), PresentationSession.id.desc())
+            .limit(1)
             .options(
                 selectinload(PresentationSession.project),
                 selectinload(PresentationSession.teacher),
@@ -144,8 +166,11 @@ class PresentationSessionRepository:
         result = await self.uow.session.execute(
             select(PresentationSession)
             .where(PresentationSession.status.in_(["PENDING", "ACTIVE"]))
-            .order_by(PresentationSession.created_at.asc())
-            .options(selectinload(PresentationSession.project))
+            .order_by(PresentationSession.created_at.asc(), PresentationSession.id.asc())
+            .options(
+                selectinload(PresentationSession.project),
+                selectinload(PresentationSession.teacher),
+            )
         )
         return list(result.scalars().all())
 
@@ -231,8 +256,12 @@ class PresentationSessionRepository:
                     PresentationSession.is_final.is_(True),
                 )
             )
-            .order_by(PresentationSession.created_at.desc())
-            .options(selectinload(PresentationSession.project))
+            .order_by(PresentationSession.created_at.desc(), PresentationSession.id.desc())
+            .limit(1)
+            .options(
+                selectinload(PresentationSession.project),
+                selectinload(PresentationSession.teacher),
+            )
         )
         return result.scalar_one_or_none()
 
@@ -248,7 +277,11 @@ class PresentationSessionRepository:
                     PresentationSession.status == "EVALUATED",
                 )
             )
-            .order_by(PresentationSession.created_at.desc())
-            .options(selectinload(PresentationSession.project))
+            .order_by(PresentationSession.created_at.desc(), PresentationSession.id.desc())
+            .limit(1)
+            .options(
+                selectinload(PresentationSession.project),
+                selectinload(PresentationSession.teacher),
+            )
         )
         return result.scalar_one_or_none()
