@@ -11,6 +11,7 @@ from src.core.container import (
     get_peer_evaluation_service,
     get_presentation_service,
     get_project_evaluation_status_service,
+    get_process_metrics_service,
 )
 from src.core.dependencies import get_current_user, setup_audit
 from src.core.exceptions import NotFoundError, PermissionError, ValidationError
@@ -30,6 +31,8 @@ from src.schema.peer_evaluation import (
     PeerEvaluationMemberFeedbackListResponse,
     PeerEvaluationSubmitResponse,
 )
+from src.schema.process_metrics import LeaderProcessMetricsResponse, MemberProcessMetricsResponse
+from src.services.process_metrics_service import ProcessMetricsService
 from src.schema.presentation import (
     PeerDeadlineResponse,
     PresentationSessionOpenResponse,
@@ -622,6 +625,57 @@ async def get_project_evaluation_status(
         return await status_service.get_project_evaluation_status(
             current_user_id=current_user.id,
             project_id=project_id,
+        )
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
+
+
+# ========== ПРОЦЕССНЫЕ МЕТРИКИ / PROCESS METRICS ==========
+
+
+@evaluation_router.get(
+    "/projects/{project_id}/metrics/leader",
+    response_model=LeaderProcessMetricsResponse,
+    summary="Получить процессные метрики руководителя проекта",
+)
+async def get_leader_process_metrics(
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    metrics_service: ProcessMetricsService = Depends(get_process_metrics_service),
+    current_user: User = Depends(get_current_user),
+) -> LeaderProcessMetricsResponse:
+    """
+    Получить MVP-метрики процессной активности руководителя проекта
+    Get MVP process metrics for project leader
+    """
+    try:
+        return await metrics_service.get_leader_process_metrics(
+            current_user_id=current_user.id,
+            project_id=project_id,
+        )
+    except Exception as exc:
+        _handle_evaluation_exception(exc)
+
+
+@evaluation_router.get(
+    "/projects/{project_id}/metrics/members/{member_id}",
+    response_model=MemberProcessMetricsResponse,
+    summary="Получить процессные метрики участника проекта",
+)
+async def get_member_process_metrics(
+    project_id: int = Path(..., ge=1, description="ID проекта"),
+    member_id: int = Path(..., ge=1, description="ID участника"),
+    metrics_service: ProcessMetricsService = Depends(get_process_metrics_service),
+    current_user: User = Depends(get_current_user),
+) -> MemberProcessMetricsResponse:
+    """
+    Получить MVP-метрики процессной активности участника проекта
+    Get MVP process metrics for project member
+    """
+    try:
+        return await metrics_service.get_member_process_metrics(
+            current_user_id=current_user.id,
+            project_id=project_id,
+            member_id=member_id,
         )
     except Exception as exc:
         _handle_evaluation_exception(exc)

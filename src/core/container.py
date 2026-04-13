@@ -23,6 +23,10 @@ from src.repository.presentation_session_repository import PresentationSessionRe
 from src.repository.rubric_repository import RubricRepository
 
 from src.repository.user_repository import UserPermissionRepository, UserRepository
+
+from src.repository.process_metrics_repository import ProcessMetricsRepository
+from src.services.process_metrics_service import ProcessMetricsService
+
 from src.services.audit_service import AuditService
 from src.services.auth_service import AuthService
 from src.services.fixtures_service import FixtureService
@@ -129,6 +133,13 @@ async def get_rubric_repository(uow: IUnitOfWork = Depends(get_uow)) -> RubricRe
     # RubricRepository работает с async session напрямую
     # RubricRepository works directly with the async session
     return RubricRepository(uow.session)
+
+
+def get_process_metrics_repository(uow: IUnitOfWork = Depends(get_uow)) -> ProcessMetricsRepository:
+    """
+    Репозиторий процессных метрик / Process metrics repository
+    """
+    return ProcessMetricsRepository(uow)
 
 # ========== Сервисы ==========
 
@@ -304,5 +315,18 @@ async def get_project_evaluation_status_service(
         session_repository=session_repository,
         commission_repository=commission_repository,
         peer_repository=peer_repository,
+        access_service=access_service,
+    )
+
+
+def get_process_metrics_service(
+    metrics_repository: ProcessMetricsRepository = Depends(get_process_metrics_repository),
+    access_service: EvaluationAccessService = Depends(get_evaluation_access_service),
+) -> ProcessMetricsService:
+    """
+    Сервис процессных метрик / Process metrics service
+    """
+    return ProcessMetricsService(
+        metrics_repository=metrics_repository,
         access_service=access_service,
     )
